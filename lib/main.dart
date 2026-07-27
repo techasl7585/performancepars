@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -31,7 +32,10 @@ class PerformanceParsApp extends StatelessWidget {
           error: Color(0xFFFF6B7A),
         ),
         textTheme: const TextTheme(
-          headlineMedium: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -0.8),
+          headlineMedium: TextStyle(
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.8,
+          ),
           titleLarge: TextStyle(fontWeight: FontWeight.w700),
           titleMedium: TextStyle(fontWeight: FontWeight.w700),
         ),
@@ -71,6 +75,8 @@ class _SystemDashboardState extends State<SystemDashboard> {
   final List<double> _diskReadHistory = [];
   final List<double> _diskWriteHistory = [];
   final List<double> _gpuHistory = [];
+  final List<double> _intelGpuHistory = [];
+  final List<double> _nvidiaGpuHistory = [];
   final List<double> _temperatureHistory = [];
 
   double _cpuPercent = 0;
@@ -108,6 +114,7 @@ class _SystemDashboardState extends State<SystemDashboard> {
     memoryTotalBytes: null,
     source: '—',
   );
+  List<GpuPerformance> _gpuPerformances = const [];
   List<TemperatureSensorReading> _temperatureSensors = const [];
   List<FanReading> _fanReadings = const [];
   List<SystemProcessInfo> _processes = const [];
@@ -136,7 +143,10 @@ class _SystemDashboardState extends State<SystemDashboard> {
     super.initState();
     _loadStaticSystemInfo();
     _updateSystemInfo();
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) => _updateSystemInfo());
+    _timer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => _updateSystemInfo(),
+    );
   }
 
   @override
@@ -183,9 +193,13 @@ class _SystemDashboardState extends State<SystemDashboard> {
       final currentUptime = _readUptime();
       final currentNetwork = _readNetworkCounters();
       final currentDiskIo = _readDiskIoCounters();
-      final currentGpu = _updateCounter == 1 || _updateCounter % 3 == 0
-          ? await _readGpuPerformance(_hardwareInfo.gpuModel)
-          : _gpuPerformance;
+      final currentGpus = _updateCounter == 1 || _updateCounter % 3 == 0
+          ? await _readGpuPerformances(_hardwareInfo.gpuModel)
+          : _gpuPerformances;
+      final currentGpu = _selectPrimaryGpu(
+        currentGpus,
+        fallback: _gpuPerformance,
+      );
 
       List<SystemProcessInfo>? currentProcesses;
       String? processError;
@@ -234,6 +248,7 @@ class _SystemDashboardState extends State<SystemDashboard> {
         _networkPerformance = newNetworkPerformance;
         _diskIoPerformance = newDiskIoPerformance;
         _gpuPerformance = currentGpu;
+        _gpuPerformances = currentGpus;
         _temperatureSensors = currentTemperatureSensors;
         _fanReadings = currentFanReadings;
         if (currentProcesses != null) {
@@ -252,13 +267,26 @@ class _SystemDashboardState extends State<SystemDashboard> {
             _downloadHistory,
             newNetworkPerformance.downloadBytesPerSecond,
           );
-          _appendRawHistory(_uploadHistory, newNetworkPerformance.uploadBytesPerSecond);
-          _appendRawHistory(_diskReadHistory, newDiskIoPerformance.readBytesPerSecond);
+          _appendRawHistory(
+            _uploadHistory,
+            newNetworkPerformance.uploadBytesPerSecond,
+          );
+          _appendRawHistory(
+            _diskReadHistory,
+            newDiskIoPerformance.readBytesPerSecond,
+          );
           _appendRawHistory(
             _diskWriteHistory,
             newDiskIoPerformance.writeBytesPerSecond,
           );
           _appendHistory(_gpuHistory, currentGpu.usagePercent);
+          for (final gpu in currentGpus.where((item) => item.available)) {
+            if (gpu.vendor == GpuVendor.intel) {
+              _appendHistory(_intelGpuHistory, gpu.usagePercent);
+            } else if (gpu.vendor == GpuVendor.nvidia) {
+              _appendHistory(_nvidiaGpuHistory, gpu.usagePercent);
+            }
+          }
           if (currentTemperature.value > 0) {
             _appendRawHistory(_temperatureHistory, currentTemperature.value);
           }
@@ -316,6 +344,8 @@ class _SystemDashboardState extends State<SystemDashboard> {
       _diskReadHistory.clear();
       _diskWriteHistory.clear();
       _gpuHistory.clear();
+      _intelGpuHistory.clear();
+      _nvidiaGpuHistory.clear();
       _temperatureHistory.clear();
     });
   }
@@ -380,7 +410,9 @@ class _SystemDashboardState extends State<SystemDashboard> {
         child: SelectionArea(
           child: LayoutBuilder(
             builder: (context, constraints) {
-              final horizontalPadding = constraints.maxWidth < 720 ? 18.0 : 30.0;
+              final horizontalPadding = constraints.maxWidth < 720
+                  ? 18.0
+                  : 30.0;
 
               return RefreshIndicator(
                 onRefresh: _updateSystemInfo,
@@ -454,6 +486,9 @@ class _SystemDashboardState extends State<SystemDashboard> {
                             networkPerformance: _networkPerformance,
                             diskIoPerformance: _diskIoPerformance,
                             gpuPerformance: _gpuPerformance,
+                            gpuPerformances: List<GpuPerformance>.of(
+                              _gpuPerformances,
+                            ),
                           ),
                         ),
                       ),
@@ -472,12 +507,23 @@ class _SystemDashboardState extends State<SystemDashboard> {
                             downloadHistory: List<double>.of(_downloadHistory),
                             uploadHistory: List<double>.of(_uploadHistory),
                             diskReadHistory: List<double>.of(_diskReadHistory),
-                            diskWriteHistory: List<double>.of(_diskWriteHistory),
+                            diskWriteHistory: List<double>.of(
+                              _diskWriteHistory,
+                            ),
                             gpuHistory: List<double>.of(_gpuHistory),
-                            temperatureHistory: List<double>.of(_temperatureHistory),
+                            intelGpuHistory: List<double>.of(_intelGpuHistory),
+                            nvidiaGpuHistory: List<double>.of(
+                              _nvidiaGpuHistory,
+                            ),
+                            temperatureHistory: List<double>.of(
+                              _temperatureHistory,
+                            ),
                             networkPerformance: _networkPerformance,
                             diskIoPerformance: _diskIoPerformance,
                             gpuPerformance: _gpuPerformance,
+                            gpuPerformances: List<GpuPerformance>.of(
+                              _gpuPerformances,
+                            ),
                             temperatureSensors: _temperatureSensors,
                             fanReadings: _fanReadings,
                             isPaused: _isHistoryPaused,
@@ -575,7 +621,8 @@ class _SystemDashboardState extends State<SystemDashboard> {
     if (_idleTemperatureValue < 65) {
       return const ThermalMaintenance(
         label: 'Orta seviye',
-        description: 'Hava kanallarını ve fan temizliğini uygun zamanda kontrol edin.',
+        description:
+            'Hava kanallarını ve fan temizliğini uygun zamanda kontrol edin.',
         color: Color(0xFFFFC857),
         icon: Icons.info_rounded,
       );
@@ -626,7 +673,11 @@ class _DashboardHeader extends StatelessWidget {
             ),
             borderRadius: BorderRadius.circular(18),
             boxShadow: const [
-              BoxShadow(color: Color(0x336CE5C3), blurRadius: 24, offset: Offset(0, 8)),
+              BoxShadow(
+                color: Color(0x336CE5C3),
+                blurRadius: 24,
+                offset: Offset(0, 8),
+              ),
             ],
           ),
           child: const Icon(
@@ -757,7 +808,9 @@ class _PageButton extends StatelessWidget {
               Icon(
                 icon,
                 size: 18,
-                color: selected ? primary : Colors.white.withValues(alpha: 0.48),
+                color: selected
+                    ? primary
+                    : Colors.white.withValues(alpha: 0.48),
               ),
               const SizedBox(width: 8),
               Flexible(
@@ -766,7 +819,9 @@ class _PageButton extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    color: selected ? primary : Colors.white.withValues(alpha: 0.55),
+                    color: selected
+                        ? primary
+                        : Colors.white.withValues(alpha: 0.55),
                     fontWeight: FontWeight.w700,
                     fontSize: 13,
                   ),
@@ -800,6 +855,7 @@ class _MainOverview extends StatelessWidget {
     required this.networkPerformance,
     required this.diskIoPerformance,
     required this.gpuPerformance,
+    required this.gpuPerformances,
   });
 
   final double cpuPercent;
@@ -820,6 +876,7 @@ class _MainOverview extends StatelessWidget {
   final NetworkPerformance networkPerformance;
   final DiskIoPerformance diskIoPerformance;
   final GpuPerformance gpuPerformance;
+  final List<GpuPerformance> gpuPerformances;
 
   @override
   Widget build(BuildContext context) {
@@ -848,7 +905,8 @@ class _MainOverview extends StatelessWidget {
                 ? 2
                 : 1;
             const gap = 14.0;
-            final cardWidth = (constraints.maxWidth - ((columns - 1) * gap)) / columns;
+            final cardWidth =
+                (constraints.maxWidth - ((columns - 1) * gap)) / columns;
 
             return Wrap(
               spacing: gap,
@@ -911,7 +969,8 @@ class _MainOverview extends StatelessWidget {
                 ? 2
                 : 1;
             const gap = 14.0;
-            final cardWidth = (constraints.maxWidth - ((columns - 1) * gap)) / columns;
+            final cardWidth =
+                (constraints.maxWidth - ((columns - 1) * gap)) / columns;
 
             return Wrap(
               spacing: gap,
@@ -933,7 +992,10 @@ class _MainOverview extends StatelessWidget {
                 ),
                 SizedBox(
                   width: cardWidth,
-                  child: _QuickSystemCard(hardwareInfo: hardwareInfo, uptime: uptime),
+                  child: _QuickSystemCard(
+                    hardwareInfo: hardwareInfo,
+                    uptime: uptime,
+                  ),
                 ),
               ],
             );
@@ -954,7 +1016,8 @@ class _MainOverview extends StatelessWidget {
                 ? 2
                 : 1;
             const gap = 14.0;
-            final cardWidth = (constraints.maxWidth - ((columns - 1) * gap)) / columns;
+            final cardWidth =
+                (constraints.maxWidth - ((columns - 1) * gap)) / columns;
 
             return Wrap(
               spacing: gap,
@@ -984,33 +1047,63 @@ class _MainOverview extends StatelessWidget {
                     icon: Icons.storage_rounded,
                     color: const Color(0xFFFFB86B),
                     primaryLabel: 'Okuma',
-                    primaryValue: _formatSpeed(diskIoPerformance.readBytesPerSecond),
+                    primaryValue: _formatSpeed(
+                      diskIoPerformance.readBytesPerSecond,
+                    ),
                     secondaryLabel: 'Yazma',
-                    secondaryValue: _formatSpeed(diskIoPerformance.writeBytesPerSecond),
-                    detail: '${diskIoPerformance.deviceCount} fiziksel disk izleniyor',
+                    secondaryValue: _formatSpeed(
+                      diskIoPerformance.writeBytesPerSecond,
+                    ),
+                    detail:
+                        '${diskIoPerformance.deviceCount} fiziksel disk izleniyor',
                   ),
                 ),
-                SizedBox(
-                  width: cardWidth,
-                  child: _TelemetrySummaryCard(
-                    title: 'GPU takibi',
-                    icon: Icons.developer_board_rounded,
-                    color: const Color(0xFF59D4FF),
-                    primaryLabel: 'Kullanım',
-                    primaryValue: gpuPerformance.available
-                        ? '${gpuPerformance.usagePercent.toStringAsFixed(0)}%'
-                        : 'Desteklenmiyor',
-                    secondaryLabel: 'Sıcaklık',
-                    secondaryValue: gpuPerformance.temperature == null
-                        ? '—'
-                        : '${gpuPerformance.temperature!.toStringAsFixed(0)} °C',
-                    detail: gpuPerformance.memoryTotalBytes == null
-                        ? gpuPerformance.name
-                        : '${gpuPerformance.name} • VRAM '
-                              '${_formatBytes(gpuPerformance.memoryUsedBytes ?? 0)} / '
-                              '${_formatBytes(gpuPerformance.memoryTotalBytes!)}',
+                for (final gpu in gpuPerformances)
+                  SizedBox(
+                    width: cardWidth,
+                    child: _TelemetrySummaryCard(
+                      title: gpu.vendor == GpuVendor.intel
+                          ? 'Intel GPU'
+                          : gpu.vendor == GpuVendor.nvidia
+                          ? 'NVIDIA GPU'
+                          : 'GPU takibi',
+                      icon: Icons.developer_board_rounded,
+                      color: gpu.vendor == GpuVendor.intel
+                          ? const Color(0xFF59D4FF)
+                          : const Color(0xFF76E06F),
+                      primaryLabel: 'Kullanım',
+                      primaryValue: gpu.available
+                          ? '${gpu.usagePercent.toStringAsFixed(0)}%'
+                          : 'Pasif',
+                      secondaryLabel: gpu.temperature == null
+                          ? 'Frekans'
+                          : 'Sıcaklık',
+                      secondaryValue: gpu.temperature != null
+                          ? '${gpu.temperature!.toStringAsFixed(0)} °C'
+                          : gpu.frequencyMhz == null
+                          ? '—'
+                          : '${gpu.frequencyMhz!.toStringAsFixed(0)} MHz',
+                      detail: _gpuDetail(gpu),
+                    ),
                   ),
-                ),
+                if (gpuPerformances.isEmpty)
+                  SizedBox(
+                    width: cardWidth,
+                    child: _TelemetrySummaryCard(
+                      title: 'GPU takibi',
+                      icon: Icons.developer_board_rounded,
+                      color: const Color(0xFF59D4FF),
+                      primaryLabel: 'Kullanım',
+                      primaryValue: gpuPerformance.available
+                          ? '${gpuPerformance.usagePercent.toStringAsFixed(0)}%'
+                          : 'Hazırlanıyor',
+                      secondaryLabel: 'Sıcaklık',
+                      secondaryValue: gpuPerformance.temperature == null
+                          ? '—'
+                          : '${gpuPerformance.temperature!.toStringAsFixed(0)} °C',
+                      detail: gpuPerformance.name,
+                    ),
+                  ),
               ],
             );
           },
@@ -1046,9 +1139,15 @@ class _PerformanceHero extends StatelessWidget {
           colors: [Color(0xFF14263A), Color(0xFF0D1829)],
         ),
         borderRadius: BorderRadius.circular(26),
-        border: Border.all(color: const Color(0xFF66A8FF).withValues(alpha: 0.18)),
+        border: Border.all(
+          color: const Color(0xFF66A8FF).withValues(alpha: 0.18),
+        ),
         boxShadow: const [
-          BoxShadow(color: Color(0x26000000), blurRadius: 34, offset: Offset(0, 15)),
+          BoxShadow(
+            color: Color(0x26000000),
+            blurRadius: 34,
+            offset: Offset(0, 15),
+          ),
         ],
       ),
       child: LayoutBuilder(
@@ -1058,7 +1157,10 @@ class _PerformanceHero extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: const Color(0xFF6CE5C3).withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(99),
@@ -1125,7 +1227,10 @@ class _PerformanceHero extends StatelessWidget {
                   children: [
                     const Text(
                       'Son 60 saniye',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                     const Spacer(),
                     _ChartLegend(label: 'CPU', color: const Color(0xFF66A8FF)),
@@ -1262,7 +1367,11 @@ class _SectionTitle extends StatelessWidget {
             color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(11),
           ),
-          child: Icon(icon, size: 19, color: Theme.of(context).colorScheme.primary),
+          child: Icon(
+            icon,
+            size: 19,
+            color: Theme.of(context).colorScheme.primary,
+          ),
         ),
         const SizedBox(width: 11),
         Expanded(
@@ -1306,7 +1415,10 @@ class _QuickSystemCard extends StatelessWidget {
               SizedBox(width: 11),
               Text(
                 'Sistem',
-                style: TextStyle(color: Color(0xFFAAB5C8), fontWeight: FontWeight.w700),
+                style: TextStyle(
+                  color: Color(0xFFAAB5C8),
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ],
           ),
@@ -1335,7 +1447,11 @@ class _QuickSystemCard extends StatelessWidget {
 }
 
 class _QuickInfoLine extends StatelessWidget {
-  const _QuickInfoLine({required this.icon, required this.label, required this.value});
+  const _QuickInfoLine({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
 
   final IconData icon;
   final String label;
@@ -1351,7 +1467,10 @@ class _QuickInfoLine extends StatelessWidget {
           width: 88,
           child: Text(
             label,
-            style: TextStyle(color: Colors.white.withValues(alpha: 0.38), fontSize: 10),
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.38),
+              fontSize: 10,
+            ),
           ),
         ),
         Expanded(
@@ -1440,7 +1559,10 @@ class _TelemetrySummaryCard extends StatelessWidget {
             detail,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: Colors.white.withValues(alpha: 0.38), fontSize: 10),
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.38),
+              fontSize: 10,
+            ),
           ),
         ],
       ),
@@ -1477,7 +1599,11 @@ class _TelemetryValue extends StatelessWidget {
           value,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: TextStyle(color: color, fontSize: 18, fontWeight: FontWeight.w800),
+          style: TextStyle(
+            color: color,
+            fontSize: 18,
+            fontWeight: FontWeight.w800,
+          ),
         ),
       ],
     );
@@ -1525,7 +1651,10 @@ class _StatusPill extends StatelessWidget {
 }
 
 class _OverviewChartPainter extends CustomPainter {
-  const _OverviewChartPainter({required this.cpuValues, required this.ramValues});
+  const _OverviewChartPainter({
+    required this.cpuValues,
+    required this.ramValues,
+  });
 
   final List<double> cpuValues;
   final List<double> ramValues;
@@ -1556,7 +1685,9 @@ class _OverviewChartPainter extends CustomPainter {
 
     final points = <Offset>[];
     for (var index = 0; index < values.length; index++) {
-      final x = values.length == 1 ? 0.0 : size.width * index / (values.length - 1);
+      final x = values.length == 1
+          ? 0.0
+          : size.width * index / (values.length - 1);
       final normalized = values[index].clamp(0, 100).toDouble() / 100;
       points.add(Offset(x, size.height - (size.height * normalized)));
     }
@@ -1572,7 +1703,10 @@ class _OverviewChartPainter extends CustomPainter {
         ..shader = LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [color.withValues(alpha: 0.16), color.withValues(alpha: 0.005)],
+          colors: [
+            color.withValues(alpha: 0.16),
+            color.withValues(alpha: 0.005),
+          ],
         ).createShader(Offset.zero & size),
     );
     canvas.drawPath(
@@ -1599,14 +1733,22 @@ class _OverviewChartPainter extends CustomPainter {
       final previous = points[index - 1];
       final current = points[index];
       final middleX = (previous.dx + current.dx) / 2;
-      path.cubicTo(middleX, previous.dy, middleX, current.dy, current.dx, current.dy);
+      path.cubicTo(
+        middleX,
+        previous.dy,
+        middleX,
+        current.dy,
+        current.dx,
+        current.dy,
+      );
     }
     return path;
   }
 
   @override
   bool shouldRepaint(covariant _OverviewChartPainter oldDelegate) {
-    return oldDelegate.cpuValues != cpuValues || oldDelegate.ramValues != ramValues;
+    return oldDelegate.cpuValues != cpuValues ||
+        oldDelegate.ramValues != ramValues;
   }
 }
 
@@ -1619,10 +1761,13 @@ class _LiveChartsPanel extends StatelessWidget {
     required this.diskReadHistory,
     required this.diskWriteHistory,
     required this.gpuHistory,
+    required this.intelGpuHistory,
+    required this.nvidiaGpuHistory,
     required this.temperatureHistory,
     required this.networkPerformance,
     required this.diskIoPerformance,
     required this.gpuPerformance,
+    required this.gpuPerformances,
     required this.temperatureSensors,
     required this.fanReadings,
     required this.isPaused,
@@ -1637,10 +1782,13 @@ class _LiveChartsPanel extends StatelessWidget {
   final List<double> diskReadHistory;
   final List<double> diskWriteHistory;
   final List<double> gpuHistory;
+  final List<double> intelGpuHistory;
+  final List<double> nvidiaGpuHistory;
   final List<double> temperatureHistory;
   final NetworkPerformance networkPerformance;
   final DiskIoPerformance diskIoPerformance;
   final GpuPerformance gpuPerformance;
+  final List<GpuPerformance> gpuPerformances;
   final List<TemperatureSensorReading> temperatureSensors;
   final List<FanReading> fanReadings;
   final bool isPaused;
@@ -1679,7 +1827,9 @@ class _LiveChartsPanel extends StatelessWidget {
             ),
             FilledButton.tonalIcon(
               onPressed: onTogglePause,
-              icon: Icon(isPaused ? Icons.play_arrow_rounded : Icons.pause_rounded),
+              icon: Icon(
+                isPaused ? Icons.play_arrow_rounded : Icons.pause_rounded,
+              ),
               label: Text(isPaused ? 'Devam ettir' : 'Grafiği duraklat'),
             ),
             OutlinedButton.icon(
@@ -1734,7 +1884,8 @@ class _LiveChartsPanel extends StatelessWidget {
                 ? 2
                 : 1;
             const gap = 14.0;
-            final cardWidth = (constraints.maxWidth - ((columns - 1) * gap)) / columns;
+            final cardWidth =
+                (constraints.maxWidth - ((columns - 1) * gap)) / columns;
 
             return Wrap(
               spacing: gap,
@@ -1758,15 +1909,38 @@ class _LiveChartsPanel extends StatelessWidget {
                     values: ramHistory,
                   ),
                 ),
-                SizedBox(
-                  width: cardWidth,
-                  child: _LiveChartCard(
-                    title: 'GPU kullanımı',
-                    icon: Icons.developer_board_rounded,
-                    color: const Color(0xFF59D4FF),
-                    values: gpuPerformance.available ? gpuHistory : const [],
+                for (final gpu in gpuPerformances.where(
+                  (item) => item.available,
+                ))
+                  SizedBox(
+                    width: cardWidth,
+                    child: _LiveChartCard(
+                      title: gpu.vendor == GpuVendor.intel
+                          ? 'Intel GPU kullanımı'
+                          : gpu.vendor == GpuVendor.nvidia
+                          ? 'NVIDIA GPU kullanımı'
+                          : '${gpu.name} kullanımı',
+                      icon: Icons.developer_board_rounded,
+                      color: gpu.vendor == GpuVendor.intel
+                          ? const Color(0xFF59D4FF)
+                          : const Color(0xFF76E06F),
+                      values: gpu.vendor == GpuVendor.intel
+                          ? intelGpuHistory
+                          : gpu.vendor == GpuVendor.nvidia
+                          ? nvidiaGpuHistory
+                          : gpuHistory,
+                    ),
                   ),
-                ),
+                if (gpuPerformances.where((item) => item.available).isEmpty)
+                  SizedBox(
+                    width: cardWidth,
+                    child: _LiveChartCard(
+                      title: 'GPU kullanımı',
+                      icon: Icons.developer_board_rounded,
+                      color: const Color(0xFF59D4FF),
+                      values: gpuPerformance.available ? gpuHistory : const [],
+                    ),
+                  ),
                 SizedBox(
                   width: cardWidth,
                   child: _LiveChartCard(
@@ -1792,7 +1966,8 @@ class _LiveChartsPanel extends StatelessWidget {
           builder: (context, constraints) {
             final columns = constraints.maxWidth >= 820 ? 2 : 1;
             const gap = 14.0;
-            final cardWidth = (constraints.maxWidth - ((columns - 1) * gap)) / columns;
+            final cardWidth =
+                (constraints.maxWidth - ((columns - 1) * gap)) / columns;
 
             return Wrap(
               spacing: gap,
@@ -1834,7 +2009,10 @@ class _LiveChartsPanel extends StatelessWidget {
           },
         ),
         const SizedBox(height: 24),
-        _AdvancedTemperaturePanel(sensors: temperatureSensors, fans: fanReadings),
+        _AdvancedTemperaturePanel(
+          sensors: temperatureSensors,
+          fans: fanReadings,
+        ),
       ],
     );
   }
@@ -1879,7 +2057,10 @@ class _DualSpeedChartCard extends StatelessWidget {
                   children: [
                     Text(
                       title,
-                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                      ),
                     ),
                     const SizedBox(height: 3),
                     Text(
@@ -1987,7 +2168,10 @@ class _DualSeriesPainter extends CustomPainter {
     final maximum = allValues.isEmpty
         ? 1.0
         : math
-              .max(1, allValues.reduce((a, b) => math.max(a, b).toDouble()) * 1.15)
+              .max(
+                1,
+                allValues.reduce((a, b) => math.max(a, b).toDouble()) * 1.15,
+              )
               .toDouble();
 
     _drawLine(canvas, size, firstValues, firstColor, maximum);
@@ -2007,7 +2191,9 @@ class _DualSeriesPainter extends CustomPainter {
 
     final points = <Offset>[];
     for (var index = 0; index < values.length; index++) {
-      final x = values.length == 1 ? 0.0 : size.width * index / (values.length - 1);
+      final x = values.length == 1
+          ? 0.0
+          : size.width * index / (values.length - 1);
       final normalized = (values[index] / maximum).clamp(0, 1).toDouble();
       points.add(Offset(x, size.height - (size.height * normalized)));
     }
@@ -2017,7 +2203,14 @@ class _DualSeriesPainter extends CustomPainter {
       final previous = points[index - 1];
       final current = points[index];
       final middleX = (previous.dx + current.dx) / 2;
-      path.cubicTo(middleX, previous.dy, middleX, current.dy, current.dx, current.dy);
+      path.cubicTo(
+        middleX,
+        previous.dy,
+        middleX,
+        current.dy,
+        current.dx,
+        current.dy,
+      );
     }
 
     canvas.drawPath(
@@ -2107,7 +2300,8 @@ class _AdvancedTemperaturePanel extends StatelessWidget {
                     ? 2
                     : 1;
                 const gap = 10.0;
-                final width = (constraints.maxWidth - ((columns - 1) * gap)) / columns;
+                final width =
+                    (constraints.maxWidth - ((columns - 1) * gap)) / columns;
 
                 return Wrap(
                   spacing: gap,
@@ -2130,7 +2324,10 @@ class _AdvancedTemperaturePanel extends StatelessWidget {
               children: [
                 for (final fan in fans)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 11,
+                      vertical: 8,
+                    ),
                     decoration: BoxDecoration(
                       color: const Color(0xFF59D4FF).withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(11),
@@ -2192,7 +2389,11 @@ class _TemperatureSensorTile extends StatelessWidget {
           const SizedBox(width: 8),
           Text(
             '${sensor.temperature.toStringAsFixed(1)} °C',
-            style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w800),
+            style: TextStyle(
+              color: color,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
           ),
         ],
       ),
@@ -2221,7 +2422,10 @@ class _EmptyTelemetry extends StatelessWidget {
           const SizedBox(width: 10),
           Text(
             message,
-            style: TextStyle(color: Colors.white.withValues(alpha: 0.42), fontSize: 11),
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.42),
+              fontSize: 11,
+            ),
           ),
         ],
       ),
@@ -2316,11 +2520,18 @@ class _LiveChartCard extends StatelessWidget {
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: _ChartStat(label: 'Tepe', value: peak, valueSuffix: valueSuffix),
+                child: _ChartStat(
+                  label: 'Tepe',
+                  value: peak,
+                  valueSuffix: valueSuffix,
+                ),
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: _ChartStat(label: 'Örnek', valueText: '${values.length}/60'),
+                child: _ChartStat(
+                  label: 'Örnek',
+                  valueText: '${values.length}/60',
+                ),
               ),
             ],
           ),
@@ -2404,7 +2615,9 @@ class _LiveChartPainter extends CustomPainter {
 
     final points = <Offset>[];
     for (var index = 0; index < values.length; index++) {
-      final x = values.length == 1 ? 0.0 : size.width * index / (values.length - 1);
+      final x = values.length == 1
+          ? 0.0
+          : size.width * index / (values.length - 1);
       final normalized = values[index].clamp(0, 100).toDouble() / 100;
       final y = size.height - (size.height * normalized);
       points.add(Offset(x, y));
@@ -2415,7 +2628,14 @@ class _LiveChartPainter extends CustomPainter {
       final previous = points[index - 1];
       final current = points[index];
       final middleX = (previous.dx + current.dx) / 2;
-      path.cubicTo(middleX, previous.dy, middleX, current.dy, current.dx, current.dy);
+      path.cubicTo(
+        middleX,
+        previous.dy,
+        middleX,
+        current.dy,
+        current.dx,
+        current.dy,
+      );
     }
 
     final fillPath = Path.from(path)
@@ -2498,7 +2718,9 @@ class _ProcessManagerPanelState extends State<_ProcessManagerPanel> {
         processes.sort((a, b) => b.memoryBytes.compareTo(a.memoryBytes));
         break;
       case _ProcessSort.name:
-        processes.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+        processes.sort(
+          (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+        );
         break;
     }
 
@@ -2510,7 +2732,10 @@ class _ProcessManagerPanelState extends State<_ProcessManagerPanel> {
             final title = Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('İşlem yöneticisi', style: Theme.of(context).textTheme.titleLarge),
+                Text(
+                  'İşlem yöneticisi',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
                 const SizedBox(height: 3),
                 Text(
                   '${widget.processes.length} işlem izleniyor',
@@ -2527,7 +2752,9 @@ class _ProcessManagerPanelState extends State<_ProcessManagerPanel> {
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 SizedBox(
-                  width: constraints.maxWidth < 620 ? constraints.maxWidth : 270,
+                  width: constraints.maxWidth < 620
+                      ? constraints.maxWidth
+                      : 270,
                   child: TextField(
                     controller: _searchController,
                     onChanged: (_) => setState(() {}),
@@ -2694,7 +2921,8 @@ class _ProcessTableHeader extends StatelessWidget {
       child: Row(
         children: [
           const Expanded(flex: 4, child: _TableLabel('İşlem')),
-          if (showUser) const Expanded(flex: 2, child: _TableLabel('Kullanıcı')),
+          if (showUser)
+            const Expanded(flex: 2, child: _TableLabel('Kullanıcı')),
           if (showPid) const SizedBox(width: 80, child: _TableLabel('PID')),
           const SizedBox(
             width: 100,
@@ -2756,7 +2984,9 @@ class _ProcessRow extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
-        border: Border(top: BorderSide(color: Colors.white.withValues(alpha: 0.04))),
+        border: Border(
+          top: BorderSide(color: Colors.white.withValues(alpha: 0.04)),
+        ),
       ),
       child: Row(
         children: [
@@ -2771,7 +3001,11 @@ class _ProcessRow extends StatelessWidget {
                     color: cpuColor.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(9),
                   ),
-                  child: Icon(Icons.terminal_rounded, size: 15, color: cpuColor),
+                  child: Icon(
+                    Icons.terminal_rounded,
+                    size: 15,
+                    color: cpuColor,
+                  ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -2779,7 +3013,10 @@ class _ProcessRow extends StatelessWidget {
                     process.name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ],
@@ -2849,7 +3086,10 @@ class _ProcessRow extends StatelessWidget {
 }
 
 class _HealthBanner extends StatelessWidget {
-  const _HealthBanner({required this.maintenance, required this.idleTemperatureText});
+  const _HealthBanner({
+    required this.maintenance,
+    required this.idleTemperatureText,
+  });
 
   final ThermalMaintenance maintenance;
   final String idleTemperatureText;
@@ -2943,7 +3183,8 @@ class _MetricsGrid extends StatelessWidget {
             ? 2
             : 1;
         const gap = 14.0;
-        final cardWidth = (constraints.maxWidth - ((columns - 1) * gap)) / columns;
+        final cardWidth =
+            (constraints.maxWidth - ((columns - 1) * gap)) / columns;
 
         return Wrap(
           spacing: gap,
@@ -3062,7 +3303,10 @@ class MetricCard extends StatelessWidget {
             detail,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: Colors.white.withValues(alpha: 0.48), fontSize: 12),
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.48),
+              fontSize: 12,
+            ),
           ),
           if (secondaryDetail != null) ...[
             const SizedBox(height: 3),
@@ -3110,7 +3354,10 @@ class TemperatureCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              _CardIcon(icon: Icons.thermostat_rounded, color: maintenance.color),
+              _CardIcon(
+                icon: Icons.thermostat_rounded,
+                color: maintenance.color,
+              ),
               const SizedBox(width: 11),
               Expanded(
                 child: Text(
@@ -3150,7 +3397,10 @@ class TemperatureCard extends StatelessWidget {
             sensor,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: Colors.white.withValues(alpha: 0.44), fontSize: 11),
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.44),
+              fontSize: 11,
+            ),
           ),
           const SizedBox(height: 12),
           _PercentBar(percent: progress, color: maintenance.color),
@@ -3224,14 +3474,21 @@ class BatteryCard extends StatelessWidget {
             detail,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w700),
+            style: TextStyle(
+              color: color,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
           ),
           const SizedBox(height: 3),
           Text(
             health,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: Colors.white.withValues(alpha: 0.44), fontSize: 11),
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.44),
+              fontSize: 11,
+            ),
           ),
           const SizedBox(height: 12),
           _PercentBar(percent: info.available ? info.percent : 0, color: color),
@@ -3271,7 +3528,9 @@ class _CardShellState extends State<_CardShell> {
           height: widget.height,
           padding: const EdgeInsets.all(19),
           decoration: BoxDecoration(
-            color: _isHovered ? const Color(0xFF142138) : const Color(0xFF101B2D),
+            color: _isHovered
+                ? const Color(0xFF142138)
+                : const Color(0xFF101B2D),
             borderRadius: BorderRadius.circular(22),
             border: Border.all(
               color: _isHovered
@@ -3280,7 +3539,9 @@ class _CardShellState extends State<_CardShell> {
             ),
             boxShadow: [
               BoxShadow(
-                color: _isHovered ? const Color(0x26000000) : const Color(0x1A000000),
+                color: _isHovered
+                    ? const Color(0x26000000)
+                    : const Color(0x1A000000),
                 blurRadius: _isHovered ? 28 : 22,
                 offset: Offset(0, _isHovered ? 13 : 10),
               ),
@@ -3373,7 +3634,10 @@ class _SystemDetails extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Sistem ayrıntıları', style: Theme.of(context).textTheme.titleMedium),
+          Text(
+            'Sistem ayrıntıları',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
           const SizedBox(height: 16),
           Wrap(
             spacing: 12,
@@ -3381,7 +3645,7 @@ class _SystemDetails extends StatelessWidget {
             children: [
               _DetailChip(
                 icon: Icons.computer_rounded,
-                label: 'Cihaz',
+                label: 'Bilgisayar adı',
                 value: hostName,
               ),
               _DetailChip(
@@ -3434,7 +3698,9 @@ class _SystemDetails extends StatelessWidget {
               _DetailChip(
                 icon: Icons.speed_rounded,
                 label: 'Boşta ölçüm',
-                value: cpuPercent < 20 ? 'Etkin' : 'CPU %20 altına düşünce güncellenir',
+                value: cpuPercent < 20
+                    ? 'Etkin'
+                    : 'CPU %20 altına düşünce güncellenir',
               ),
               _DetailChip(
                 icon: Icons.device_thermostat_rounded,
@@ -3459,7 +3725,11 @@ class _SystemDetails extends StatelessWidget {
 }
 
 class _DetailChip extends StatelessWidget {
-  const _DetailChip({required this.icon, required this.label, required this.value});
+  const _DetailChip({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
 
   final IconData icon;
   final String label;
@@ -3495,7 +3765,10 @@ class _DetailChip extends StatelessWidget {
                   value,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ],
             ),
@@ -3649,6 +3922,8 @@ class DiskIoPerformance {
   final int deviceCount;
 }
 
+enum GpuVendor { intel, nvidia, amd, unknown }
+
 class GpuPerformance {
   const GpuPerformance({
     required this.available,
@@ -3658,6 +3933,9 @@ class GpuPerformance {
     required this.memoryUsedBytes,
     required this.memoryTotalBytes,
     required this.source,
+    this.vendor = GpuVendor.unknown,
+    this.frequencyMhz,
+    this.powerWatts,
   });
 
   final bool available;
@@ -3667,10 +3945,16 @@ class GpuPerformance {
   final double? memoryUsedBytes;
   final double? memoryTotalBytes;
   final String source;
+  final GpuVendor vendor;
+  final double? frequencyMhz;
+  final double? powerWatts;
 }
 
 class TemperatureSensorReading {
-  const TemperatureSensorReading({required this.label, required this.temperature});
+  const TemperatureSensorReading({
+    required this.label,
+    required this.temperature,
+  });
 
   final String label;
   final double temperature;
@@ -3839,7 +4123,10 @@ NetworkCounters _readNetworkCounters() {
           continue;
         }
 
-        final values = line.substring(separator + 1).trim().split(RegExp(r'\s+'));
+        final values = line
+            .substring(separator + 1)
+            .trim()
+            .split(RegExp(r'\s+'));
         if (values.length < 9) {
           continue;
         }
@@ -3913,7 +4200,10 @@ NetworkPerformance _calculateNetworkPerformance(
     );
   }
 
-  final receivedDelta = math.max(0, current.receivedBytes - previous.receivedBytes);
+  final receivedDelta = math.max(
+    0,
+    current.receivedBytes - previous.receivedBytes,
+  );
   final sentDelta = math.max(0, current.sentBytes - previous.sentBytes);
   return NetworkPerformance(
     interfaceName: current.interfaceName,
@@ -4005,41 +4295,112 @@ DiskIoPerformance _calculateDiskIoPerformance(
   );
 }
 
-Future<GpuPerformance> _readGpuPerformance(String fallbackName) async {
+Future<List<GpuPerformance>> _readGpuPerformances(String fallbackName) async {
+  final performances = <GpuPerformance>[];
+
   try {
     final result = await Process.run('nvidia-smi', [
-      '--query-gpu=name,utilization.gpu,temperature.gpu,memory.used,memory.total',
+      '--query-gpu=name,utilization.gpu,temperature.gpu,memory.used,memory.total,'
+          'power.draw,clocks.current.graphics',
       '--format=csv,noheader,nounits',
     ]);
     if (result.exitCode == 0) {
-      final line = result.stdout
-          .toString()
-          .split('\n')
-          .map((value) => value.trim())
-          .firstWhere((value) => value.isNotEmpty, orElse: () => '');
-      final values = line.split(',').map((value) => value.trim()).toList();
-      if (values.length >= 5) {
-        final usage = double.tryParse(values[1]);
-        final temperature = double.tryParse(values[2]);
-        final memoryUsedMb = double.tryParse(values[3]);
-        final memoryTotalMb = double.tryParse(values[4]);
-        if (usage != null) {
-          return GpuPerformance(
-            available: true,
-            name: values[0].isEmpty ? fallbackName : values[0],
-            usagePercent: usage.clamp(0, 100).toDouble(),
-            temperature: temperature,
-            memoryUsedBytes: memoryUsedMb == null ? null : memoryUsedMb * 1024 * 1024,
-            memoryTotalBytes: memoryTotalMb == null
-                ? null
-                : memoryTotalMb * 1024 * 1024,
-            source: 'nvidia-smi',
+      for (final line in result.stdout.toString().split('\n')) {
+        final trimmed = line.trim();
+        if (trimmed.isEmpty) {
+          continue;
+        }
+        final values = trimmed.split(',').map((value) => value.trim()).toList();
+        if (values.length >= 5) {
+          final usage = double.tryParse(values[1]);
+          final temperature = double.tryParse(values[2]);
+          final memoryUsedMb = double.tryParse(values[3]);
+          final memoryTotalMb = double.tryParse(values[4]);
+          final powerWatts = values.length > 5
+              ? double.tryParse(values[5])
+              : null;
+          final frequencyMhz = values.length > 6
+              ? double.tryParse(values[6])
+              : null;
+          performances.add(
+            GpuPerformance(
+              available: true,
+              name: values[0].isEmpty
+                  ? _gpuNameForVendor(fallbackName, GpuVendor.nvidia)
+                  : values[0],
+              usagePercent: (usage ?? 0).clamp(0, 100).toDouble(),
+              temperature: temperature,
+              memoryUsedBytes: memoryUsedMb == null
+                  ? null
+                  : memoryUsedMb * 1024 * 1024,
+              memoryTotalBytes: memoryTotalMb == null
+                  ? null
+                  : memoryTotalMb * 1024 * 1024,
+              source: 'nvidia-smi',
+              vendor: GpuVendor.nvidia,
+              frequencyMhz: frequencyMhz,
+              powerWatts: powerWatts,
+            ),
           );
         }
       }
     }
   } catch (_) {
-    // NVIDIA aracı yoksa sysfs ile devam edilir.
+    // NVIDIA aracı yoksa diğer GPU kaynakları kullanılmaya devam edilir.
+  }
+
+  try {
+    final result = await Process.run('timeout', [
+      '--signal=INT',
+      '2',
+      'intel_gpu_top',
+      '-J',
+      '-s',
+      '1000',
+    ]);
+    final output = result.stdout.toString();
+    final jsonStart = output.indexOf('[');
+    final jsonEnd = output.lastIndexOf(']');
+    if (jsonStart >= 0 && jsonEnd > jsonStart) {
+      final decoded = jsonDecode(output.substring(jsonStart, jsonEnd + 1));
+      if (decoded is List && decoded.isNotEmpty) {
+        final sample = decoded.last;
+        if (sample is Map) {
+          var usage = 0.0;
+          final engines = sample['engines'];
+          if (engines is Map) {
+            for (final engine in engines.values) {
+              if (engine is Map) {
+                usage = math
+                    .max(usage, _jsonDouble(engine['busy']) ?? 0)
+                    .toDouble();
+              }
+            }
+          }
+
+          final frequency = sample['frequency'];
+          final power = sample['power'];
+          performances.add(
+            GpuPerformance(
+              available: true,
+              name: _gpuNameForVendor(fallbackName, GpuVendor.intel),
+              usagePercent: usage.clamp(0, 100).toDouble(),
+              temperature: null,
+              memoryUsedBytes: null,
+              memoryTotalBytes: null,
+              source: 'intel_gpu_top',
+              vendor: GpuVendor.intel,
+              frequencyMhz: frequency is Map
+                  ? _jsonDouble(frequency['actual'])
+                  : null,
+              powerWatts: power is Map ? _jsonDouble(power['GPU']) : null,
+            ),
+          );
+        }
+      }
+    }
+  } catch (_) {
+    // Intel PMU aracı yoksa sysfs ve algılanan cihaz bilgisi kullanılır.
   }
 
   try {
@@ -4052,13 +4413,20 @@ Future<GpuPerformance> _readGpuPerformance(String fallbackName) async {
         }
 
         final devicePath = '${entity.path}/device';
-        final usage =
-            _readNumberFile('$devicePath/gpu_busy_percent') ??
-            _readNumberFile('$devicePath/gt_busy_percent');
-        if (usage == null) {
+        final vendorCode = _readTextFile('$devicePath/vendor').toLowerCase();
+        final vendor = switch (vendorCode) {
+          '0x8086' => GpuVendor.intel,
+          '0x10de' => GpuVendor.nvidia,
+          '0x1002' || '0x1022' => GpuVendor.amd,
+          _ => GpuVendor.unknown,
+        };
+        if (performances.any((gpu) => gpu.vendor == vendor)) {
           continue;
         }
 
+        final usage =
+            _readNumberFile('$devicePath/gpu_busy_percent') ??
+            _readNumberFile('$devicePath/gt_busy_percent');
         double? temperature;
         final hwmonDirectory = Directory('$devicePath/hwmon');
         if (hwmonDirectory.existsSync()) {
@@ -4073,22 +4441,17 @@ Future<GpuPerformance> _readGpuPerformance(String fallbackName) async {
           }
         }
 
-        final vendorCode = _readTextFile('$devicePath/vendor').toLowerCase();
-        final vendorName = switch (vendorCode) {
-          '0x8086' => 'Intel GPU',
-          '0x10de' => 'NVIDIA GPU',
-          '0x1002' || '0x1022' => 'AMD GPU',
-          _ => fallbackName,
-        };
-
-        return GpuPerformance(
-          available: true,
-          name: vendorName.isEmpty ? name : vendorName,
-          usagePercent: usage.clamp(0, 100).toDouble(),
-          temperature: temperature,
-          memoryUsedBytes: null,
-          memoryTotalBytes: null,
-          source: 'sysfs',
+        performances.add(
+          GpuPerformance(
+            available: usage != null,
+            name: _gpuNameForVendor(fallbackName, vendor, fallback: name),
+            usagePercent: (usage ?? 0).clamp(0, 100).toDouble(),
+            temperature: temperature,
+            memoryUsedBytes: null,
+            memoryTotalBytes: null,
+            source: usage == null ? 'Sensör bekleniyor' : 'sysfs',
+            vendor: vendor,
+          ),
         );
       }
     }
@@ -4096,15 +4459,107 @@ Future<GpuPerformance> _readGpuPerformance(String fallbackName) async {
     // Desteklenmeyen sürücü güvenli bir sonuç döndürür.
   }
 
-  return GpuPerformance(
-    available: false,
-    name: fallbackName.isEmpty ? 'GPU kullanım sensörü yok' : fallbackName,
-    usagePercent: 0,
-    temperature: null,
-    memoryUsedBytes: null,
-    memoryTotalBytes: null,
-    source: 'Desteklenmiyor',
+  if (performances.isEmpty) {
+    performances.add(
+      GpuPerformance(
+        available: false,
+        name: fallbackName.isEmpty ? 'GPU kullanım sensörü yok' : fallbackName,
+        usagePercent: 0,
+        temperature: null,
+        memoryUsedBytes: null,
+        memoryTotalBytes: null,
+        source: 'Desteklenmiyor',
+      ),
+    );
+  }
+
+  performances.sort((first, second) {
+    const order = {
+      GpuVendor.intel: 0,
+      GpuVendor.nvidia: 1,
+      GpuVendor.amd: 2,
+      GpuVendor.unknown: 3,
+    };
+    return order[first.vendor]!.compareTo(order[second.vendor]!);
+  });
+  return performances;
+}
+
+GpuPerformance _selectPrimaryGpu(
+  List<GpuPerformance> performances, {
+  required GpuPerformance fallback,
+}) {
+  for (final gpu in performances) {
+    if (gpu.vendor == GpuVendor.nvidia && gpu.available) {
+      return gpu;
+    }
+  }
+  for (final gpu in performances) {
+    if (gpu.available) {
+      return gpu;
+    }
+  }
+  return performances.isEmpty ? fallback : performances.first;
+}
+
+double? _jsonDouble(Object? value) {
+  if (value is num) {
+    return value.toDouble();
+  }
+  return double.tryParse(value?.toString() ?? '');
+}
+
+String _gpuNameForVendor(
+  String hardwareName,
+  GpuVendor vendor, {
+  String fallback = 'GPU',
+}) {
+  final segments = hardwareName.split(' + ');
+  final needle = switch (vendor) {
+    GpuVendor.intel => 'intel',
+    GpuVendor.nvidia => 'nvidia',
+    GpuVendor.amd => 'amd',
+    GpuVendor.unknown => '',
+  };
+  final segment = segments.firstWhere(
+    (value) => needle.isNotEmpty && value.toLowerCase().contains(needle),
+    orElse: () => '',
   );
+
+  if (vendor == GpuVendor.intel) {
+    final model = RegExp(
+      r'\[(UHD|Iris|HD)[^\]]*\]',
+      caseSensitive: false,
+    ).firstMatch(segment);
+    if (model != null) {
+      final value = model.group(0)!.replaceAll(RegExp(r'[\[\]]'), '');
+      return 'Intel $value';
+    }
+    return segment.isEmpty ? 'Intel GPU' : segment;
+  }
+  if (vendor == GpuVendor.nvidia) {
+    return segment.isEmpty ? 'NVIDIA GPU' : segment;
+  }
+  if (vendor == GpuVendor.amd) {
+    return segment.isEmpty ? 'AMD GPU' : segment;
+  }
+  return segment.isEmpty ? fallback : segment;
+}
+
+String _gpuDetail(GpuPerformance gpu) {
+  final details = <String>[gpu.name];
+  if (gpu.memoryTotalBytes != null) {
+    details.add(
+      'VRAM ${_formatBytes(gpu.memoryUsedBytes ?? 0)} / '
+      '${_formatBytes(gpu.memoryTotalBytes!)}',
+    );
+  } else if (gpu.frequencyMhz != null) {
+    details.add('${gpu.frequencyMhz!.toStringAsFixed(0)} MHz');
+  }
+  if (gpu.powerWatts != null) {
+    details.add('${gpu.powerWatts!.toStringAsFixed(1)} W');
+  }
+  return details.join(' • ');
 }
 
 Future<List<SystemProcessInfo>> _readSystemProcesses() async {
@@ -4181,7 +4636,8 @@ BatteryInfo _readBatteryInfo() {
     final status = _translateBatteryStatus(rawStatus);
 
     final full =
-        _readNumberFile('$path/energy_full') ?? _readNumberFile('$path/charge_full');
+        _readNumberFile('$path/energy_full') ??
+        _readNumberFile('$path/charge_full');
     final design =
         _readNumberFile('$path/energy_full_design') ??
         _readNumberFile('$path/charge_full_design');
@@ -4199,9 +4655,11 @@ BatteryInfo _readBatteryInfo() {
     ].where((value) => value.isNotEmpty).join(' ').trim();
 
     final now =
-        _readNumberFile('$path/energy_now') ?? _readNumberFile('$path/charge_now');
+        _readNumberFile('$path/energy_now') ??
+        _readNumberFile('$path/charge_now');
     final rate =
-        _readNumberFile('$path/power_now') ?? _readNumberFile('$path/current_now');
+        _readNumberFile('$path/power_now') ??
+        _readNumberFile('$path/current_now');
     final remainingTime = _calculateBatteryTime(
       rawStatus: rawStatus,
       now: now,
@@ -4331,11 +4789,16 @@ List<TemperatureSensorReading> _readAllTemperatureSensors() {
     if (temperature == null) {
       return;
     }
-    final normalizedLabel = label.trim().isEmpty ? 'Sıcaklık sensörü' : label.trim();
+    final normalizedLabel = label.trim().isEmpty
+        ? 'Sıcaklık sensörü'
+        : label.trim();
     final key = '$normalizedLabel:${temperature.toStringAsFixed(1)}';
     if (seen.add(key)) {
       readings.add(
-        TemperatureSensorReading(label: normalizedLabel, temperature: temperature),
+        TemperatureSensorReading(
+          label: normalizedLabel,
+          temperature: temperature,
+        ),
       );
     }
   }
@@ -4468,7 +4931,9 @@ int _temperatureSensorPriority(String sensorName) {
       sensor.contains('package')) {
     return 100;
   }
-  if (sensor.contains('tctl') || sensor.contains('tdie') || sensor.contains('core')) {
+  if (sensor.contains('tctl') ||
+      sensor.contains('tdie') ||
+      sensor.contains('core')) {
     return 90;
   }
   if (sensor.contains('acpitz')) {
@@ -4525,8 +4990,10 @@ Future<SystemHardwareInfo> _readSystemHardwareInfo() async {
                 line.contains('Display controller'),
           )
           .map(
-            (line) =>
-                line.replaceAll('"', '').replaceFirst(RegExp(r'^[^\s]+\s+'), '').trim(),
+            (line) => line
+                .replaceAll('"', '')
+                .replaceFirst(RegExp(r'^[^\s]+\s+'), '')
+                .trim(),
           )
           .where((line) => line.isNotEmpty)
           .toList();
@@ -4605,7 +5072,9 @@ Future<String> _readStorageModel() async {
 
         final withoutType = trimmed.substring(0, trimmed.length - 5).trim();
         final firstSpace = withoutType.indexOf(RegExp(r'\s+'));
-        final model = firstSpace < 0 ? '' : withoutType.substring(firstSpace).trim();
+        final model = firstSpace < 0
+            ? ''
+            : withoutType.substring(firstSpace).trim();
         final name = firstSpace < 0
             ? withoutType
             : withoutType.substring(0, firstSpace).trim();
@@ -4613,7 +5082,9 @@ Future<String> _readStorageModel() async {
         if (model.isNotEmpty) {
           disks.add(model);
         } else if (name.isNotEmpty) {
-          final sysfsModel = _readTextFile('/sys/class/block/$name/device/model');
+          final sysfsModel = _readTextFile(
+            '/sys/class/block/$name/device/model',
+          );
           disks.add(sysfsModel.isEmpty ? name : sysfsModel);
         }
       }
@@ -4629,7 +5100,8 @@ Future<String> _readStorageModel() async {
   try {
     final blockDirectory = Directory('/sys/class/block');
     if (blockDirectory.existsSync()) {
-      for (final directory in blockDirectory.listSync().whereType<Directory>()) {
+      for (final directory
+          in blockDirectory.listSync().whereType<Directory>()) {
         final name = directory.path.split('/').last;
         if (name.startsWith('loop') ||
             name.startsWith('ram') ||
