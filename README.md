@@ -1,13 +1,13 @@
 # PerformancePars
 
 PerformancePars; Pardus 25 ve Debian tabanlı Linux sistemlerde işlemci, bellek,
-disk, ağ, GPU, sıcaklık, batarya, işlemler ve depolama sağlığını tek arayüzde
-izleyen Flutter masaüstü uygulamasıdır.
+disk, ağ, GPU, sıcaklık, batarya, işlemler ve depolama sağlığı gibi işlevleri tek arayüzde
+izleyen masaüstü uygulamasıdır.
 
 ## Özellikler
 
-- CPU, RAM ve dosya sistemi kullanım takibi
-- Intel, NVIDIA ve desteklenen sysfs tabanlı GPU sensörleri
+- CPU Sıcaklık ve Kullanım Takibi ve Grafikleri
+- GPU Sıcaklık Frekans Takibi ve Grafikleri
 - Ağ indirme/yükleme ve fiziksel disk okuma/yazma grafikleri
 - İşlem yöneticisi
 - Gelişmiş sıcaklık ve fan sensörleri
