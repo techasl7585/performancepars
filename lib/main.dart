@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
@@ -66,6 +67,7 @@ class _SystemDashboardState extends State<SystemDashboard> {
   int _updateCounter = 0;
   DateTime? _lastUpdated;
   DateTime? _lastProcessRefresh;
+  bool _isStorageBenchmarkRunning = false;
 
   final List<double> _cpuHistory = [];
   final List<double> _ramHistory = [];
@@ -115,6 +117,8 @@ class _SystemDashboardState extends State<SystemDashboard> {
     source: '—',
   );
   List<GpuPerformance> _gpuPerformances = const [];
+  List<StorageDeviceInfo> _storageDevices = const [];
+  StorageBenchmarkResult? _storageBenchmark;
   List<TemperatureSensorReading> _temperatureSensors = const [];
   List<FanReading> _fanReadings = const [];
   List<SystemProcessInfo> _processes = const [];
@@ -196,6 +200,10 @@ class _SystemDashboardState extends State<SystemDashboard> {
       final currentGpus = _updateCounter == 1 || _updateCounter % 3 == 0
           ? await _readGpuPerformances(_hardwareInfo.gpuModel)
           : _gpuPerformances;
+      final currentStorageDevices =
+          _updateCounter == 1 || _updateCounter % 30 == 0
+          ? await _readStorageDevices()
+          : _storageDevices;
       final currentGpu = _selectPrimaryGpu(
         currentGpus,
         fallback: _gpuPerformance,
@@ -249,6 +257,7 @@ class _SystemDashboardState extends State<SystemDashboard> {
         _diskIoPerformance = newDiskIoPerformance;
         _gpuPerformance = currentGpu;
         _gpuPerformances = currentGpus;
+        _storageDevices = currentStorageDevices;
         _temperatureSensors = currentTemperatureSensors;
         _fanReadings = currentFanReadings;
         if (currentProcesses != null) {
@@ -401,6 +410,35 @@ class _SystemDashboardState extends State<SystemDashboard> {
     );
   }
 
+  Future<void> _startStorageBenchmark() async {
+    if (_isStorageBenchmarkRunning) {
+      return;
+    }
+
+    setState(() {
+      _isStorageBenchmarkRunning = true;
+    });
+
+    try {
+      final result = await _runStorageBenchmark();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _storageBenchmark = result;
+      });
+      if (result.error.isNotEmpty) {
+        _showMessage(result.error);
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isStorageBenchmarkRunning = false;
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final maintenance = _thermalMaintenance;
@@ -489,6 +527,13 @@ class _SystemDashboardState extends State<SystemDashboard> {
                             gpuPerformances: List<GpuPerformance>.of(
                               _gpuPerformances,
                             ),
+                            storageDevices: List<StorageDeviceInfo>.of(
+                              _storageDevices,
+                            ),
+                            storageBenchmark: _storageBenchmark,
+                            isStorageBenchmarkRunning:
+                                _isStorageBenchmarkRunning,
+                            onRunStorageBenchmark: _startStorageBenchmark,
                           ),
                         ),
                       ),
@@ -856,6 +901,10 @@ class _MainOverview extends StatelessWidget {
     required this.diskIoPerformance,
     required this.gpuPerformance,
     required this.gpuPerformances,
+    required this.storageDevices,
+    required this.storageBenchmark,
+    required this.isStorageBenchmarkRunning,
+    required this.onRunStorageBenchmark,
   });
 
   final double cpuPercent;
@@ -877,6 +926,10 @@ class _MainOverview extends StatelessWidget {
   final DiskIoPerformance diskIoPerformance;
   final GpuPerformance gpuPerformance;
   final List<GpuPerformance> gpuPerformances;
+  final List<StorageDeviceInfo> storageDevices;
+  final StorageBenchmarkResult? storageBenchmark;
+  final bool isStorageBenchmarkRunning;
+  final VoidCallback onRunStorageBenchmark;
 
   @override
   Widget build(BuildContext context) {
@@ -953,6 +1006,19 @@ class _MainOverview extends StatelessWidget {
               ],
             );
           },
+        ),
+        const SizedBox(height: 24),
+        const _SectionTitle(
+          title: 'Depolama sağlığı',
+          subtitle: 'SSD ve HDD cihazları ayrı ayrı izleniyor',
+          icon: Icons.health_and_safety_outlined,
+        ),
+        const SizedBox(height: 12),
+        _StorageHealthPanel(
+          devices: storageDevices,
+          benchmark: storageBenchmark,
+          isBenchmarkRunning: isStorageBenchmarkRunning,
+          onRunBenchmark: onRunStorageBenchmark,
         ),
         const SizedBox(height: 24),
         const _SectionTitle(
@@ -1109,6 +1175,282 @@ class _MainOverview extends StatelessWidget {
           },
         ),
       ],
+    );
+  }
+}
+
+class _StorageHealthPanel extends StatelessWidget {
+  const _StorageHealthPanel({
+    required this.devices,
+    required this.benchmark,
+    required this.isBenchmarkRunning,
+    required this.onRunBenchmark,
+  });
+
+  final List<StorageDeviceInfo> devices;
+  final StorageBenchmarkResult? benchmark;
+  final bool isBenchmarkRunning;
+  final VoidCallback onRunBenchmark;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 900
+            ? 3
+            : constraints.maxWidth >= 620
+            ? 2
+            : 1;
+        const gap = 14.0;
+        final cardWidth =
+            (constraints.maxWidth - ((columns - 1) * gap)) / columns;
+
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          children: [
+            for (final device in devices)
+              SizedBox(
+                width: cardWidth,
+                child: _StorageDeviceCard(device: device),
+              ),
+            if (devices.isEmpty)
+              SizedBox(
+                width: cardWidth,
+                child: const _StorageEmptyCard(),
+              ),
+            SizedBox(
+              width: cardWidth,
+              child: _StorageBenchmarkCard(
+                result: benchmark,
+                isRunning: isBenchmarkRunning,
+                onRun: onRunBenchmark,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _StorageDeviceCard extends StatelessWidget {
+  const _StorageDeviceCard({required this.device});
+
+  final StorageDeviceInfo device;
+
+  @override
+  Widget build(BuildContext context) {
+    final isSsd = device.kind == StorageDeviceKind.ssd;
+    final color = isSsd
+        ? const Color(0xFF6CE5C3)
+        : const Color(0xFFFFB86B);
+    final healthColor = device.healthFailed
+        ? const Color(0xFFFF6B7A)
+        : device.smartAvailable
+        ? const Color(0xFF6CE5C3)
+        : const Color(0xFFFFC857);
+
+    return _CardShell(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _CardIcon(
+                icon: isSsd ? Icons.sd_storage_rounded : Icons.storage_rounded,
+                color: color,
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      isSsd ? 'SSD' : 'HDD',
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    Text(
+                      '/dev/${device.name} • ${device.transport}',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.38),
+                        fontSize: 10,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Text(
+                _formatBytes(device.sizeBytes),
+                style: TextStyle(
+                  color: color,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+          const Spacer(),
+          Row(
+            children: [
+              Expanded(
+                child: _TelemetryValue(
+                  label: 'Sağlık',
+                  value: device.healthText,
+                  color: healthColor,
+                ),
+              ),
+              Container(
+                width: 1,
+                height: 38,
+                color: Colors.white.withValues(alpha: 0.06),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: _TelemetryValue(
+                  label: 'Sıcaklık',
+                  value: device.temperature == null
+                      ? '—'
+                      : '${device.temperature!.toStringAsFixed(0)} °C',
+                  color: device.temperature != null && device.temperature! >= 60
+                      ? const Color(0xFFFF6B7A)
+                      : Colors.white,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Text(
+            device.model,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.44),
+              fontSize: 10,
+            ),
+          ),
+          if (device.healthPercent != null) ...[
+            const SizedBox(height: 9),
+            _PercentBar(percent: device.healthPercent!, color: healthColor),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _StorageEmptyCard extends StatelessWidget {
+  const _StorageEmptyCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return _CardShell(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _CardIcon(
+            icon: Icons.storage_rounded,
+            color: Color(0xFFFFB86B),
+          ),
+          const Spacer(),
+          const Text(
+            'Fiziksel disk aranıyor',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 7),
+          Text(
+            'lsblk üzerinden SSD ve HDD bilgileri hazırlanıyor.',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.42),
+              fontSize: 11,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StorageBenchmarkCard extends StatelessWidget {
+  const _StorageBenchmarkCard({
+    required this.result,
+    required this.isRunning,
+    required this.onRun,
+  });
+
+  final StorageBenchmarkResult? result;
+  final bool isRunning;
+  final VoidCallback onRun;
+
+  @override
+  Widget build(BuildContext context) {
+    const color = Color(0xFF66A8FF);
+
+    return _CardShell(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              _CardIcon(icon: Icons.speed_rounded, color: color),
+              SizedBox(width: 11),
+              Expanded(
+                child: Text(
+                  'Sistem diski hız testi',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+            ],
+          ),
+          const Spacer(),
+          if (result != null && result!.error.isEmpty)
+            Row(
+              children: [
+                Expanded(
+                  child: _TelemetryValue(
+                    label: 'Okuma',
+                    value: _formatSpeed(result!.readBytesPerSecond),
+                    color: color,
+                  ),
+                ),
+                Expanded(
+                  child: _TelemetryValue(
+                    label: 'Yazma',
+                    value: _formatSpeed(result!.writeBytesPerSecond),
+                    color: const Color(0xFF6CE5C3),
+                  ),
+                ),
+              ],
+            )
+          else
+            Text(
+              result?.error.isNotEmpty == true
+                  ? result!.error
+                  : '128 MB geçici dosyayla okuma ve yazma ölçümü.',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.46),
+                fontSize: 11,
+              ),
+            ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: isRunning ? null : onRun,
+              icon: isRunning
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.play_arrow_rounded),
+              label: Text(isRunning ? 'Test yapılıyor…' : 'Hız testini başlat'),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -3800,6 +4142,62 @@ class DiskInfo {
   final String text;
 }
 
+enum StorageDeviceKind { ssd, hdd }
+
+class StorageDeviceInfo {
+  const StorageDeviceInfo({
+    required this.name,
+    required this.model,
+    required this.kind,
+    required this.transport,
+    required this.sizeBytes,
+    required this.smartAvailable,
+    required this.healthFailed,
+    required this.healthText,
+    required this.healthPercent,
+    required this.temperature,
+  });
+
+  final String name;
+  final String model;
+  final StorageDeviceKind kind;
+  final String transport;
+  final int sizeBytes;
+  final bool smartAvailable;
+  final bool healthFailed;
+  final String healthText;
+  final double? healthPercent;
+  final double? temperature;
+}
+
+class StorageBenchmarkResult {
+  const StorageBenchmarkResult({
+    required this.readBytesPerSecond,
+    required this.writeBytesPerSecond,
+    required this.error,
+  });
+
+  final double readBytesPerSecond;
+  final double writeBytesPerSecond;
+  final String error;
+}
+
+class _SmartStorageInfo {
+  const _SmartStorageInfo({
+    required this.smartAvailable,
+    required this.healthFailed,
+    required this.healthText,
+    required this.healthPercent,
+    required this.temperature,
+  });
+
+  final bool smartAvailable;
+  final bool healthFailed;
+  final String healthText;
+  final double? healthPercent;
+  final double? temperature;
+}
+
 class TemperatureInfo {
   const TemperatureInfo({
     required this.value,
@@ -4097,6 +4495,478 @@ Future<DiskInfo> _readDiskInfo() async {
     );
   } catch (_) {
     return const DiskInfo(percent: 0, text: 'Disk okunamadı');
+  }
+}
+
+Future<List<StorageDeviceInfo>> _readStorageDevices() async {
+  final devices = <StorageDeviceInfo>[];
+
+  try {
+    final result = await Process.run('lsblk', [
+      '-J',
+      '-b',
+      '-d',
+      '-o',
+      'NAME,MODEL,TYPE,ROTA,TRAN,SIZE',
+    ]);
+    if (result.exitCode != 0) {
+      return devices;
+    }
+
+    final decoded = jsonDecode(result.stdout.toString());
+    if (decoded is! Map || decoded['blockdevices'] is! List) {
+      return devices;
+    }
+
+    var udisksDump = '';
+    try {
+      final udisksResult = await Process.run('udisksctl', ['dump']);
+      if (udisksResult.exitCode == 0) {
+        udisksDump = udisksResult.stdout.toString();
+      }
+    } catch (_) {
+      // UDisks yoksa smartctl ve sysfs yedekleri kullanılacaktır.
+    }
+
+    for (final entry in decoded['blockdevices'] as List) {
+      if (entry is! Map || entry['type']?.toString() != 'disk') {
+        continue;
+      }
+
+      final name = entry['name']?.toString().trim() ?? '';
+      if (name.isEmpty ||
+          name.startsWith('loop') ||
+          name.startsWith('ram') ||
+          name.startsWith('zram') ||
+          name.startsWith('dm-')) {
+        continue;
+      }
+
+      final rotationalValue = entry['rota'];
+      final isRotational =
+          rotationalValue == true ||
+          rotationalValue == 1 ||
+          rotationalValue?.toString() == '1';
+      final kind = isRotational
+          ? StorageDeviceKind.hdd
+          : StorageDeviceKind.ssd;
+      final model = entry['model']?.toString().trim();
+      final transportValue = entry['tran']?.toString().trim().toUpperCase();
+      final sizeBytes =
+          int.tryParse(entry['size']?.toString() ?? '') ??
+          (entry['size'] is num ? (entry['size'] as num).toInt() : 0);
+
+      final udisksSmart = _readUDisksStorageInfo(udisksDump, name, kind);
+      final smart = udisksSmart.smartAvailable
+          ? udisksSmart
+          : await _readSmartStorageInfo(name, kind);
+      final sysfsTemperature = _readStorageTemperature(name);
+      devices.add(
+        StorageDeviceInfo(
+          name: name,
+          model: model == null || model.isEmpty ? name : model,
+          kind: kind,
+          transport:
+              transportValue == null || transportValue.isEmpty
+              ? (name.startsWith('nvme') ? 'NVMe' : 'Yerel')
+              : transportValue,
+          sizeBytes: sizeBytes,
+          smartAvailable: smart.smartAvailable,
+          healthFailed: smart.healthFailed,
+          healthText: smart.healthText,
+          healthPercent: smart.healthPercent,
+          temperature: smart.temperature ?? sysfsTemperature,
+        ),
+      );
+    }
+  } catch (_) {
+    // Depolama cihazları okunamazsa boş liste güvenli yedek olarak kullanılır.
+  }
+
+  devices.sort((first, second) {
+    if (first.kind == second.kind) {
+      return first.name.compareTo(second.name);
+    }
+    return first.kind == StorageDeviceKind.ssd ? -1 : 1;
+  });
+  return devices;
+}
+
+_SmartStorageInfo _readUDisksStorageInfo(
+  String dump,
+  String deviceName,
+  StorageDeviceKind kind,
+) {
+  if (dump.isEmpty) {
+    return const _SmartStorageInfo(
+      smartAvailable: false,
+      healthFailed: false,
+      healthText: 'SMART gerekli',
+      healthPercent: null,
+      temperature: null,
+    );
+  }
+
+  try {
+    final blockPath =
+        '/org/freedesktop/UDisks2/block_devices/$deviceName';
+    final blockSection = _udisksObjectSection(
+      dump,
+      blockPath,
+    );
+    final driveMatch = RegExp(
+      r"^\s*Drive:\s+'?([^'\s]+)'?",
+      multiLine: true,
+    ).firstMatch(blockSection);
+    if (driveMatch == null) {
+      return const _SmartStorageInfo(
+        smartAvailable: false,
+        healthFailed: false,
+        healthText: 'SMART gerekli',
+        healthPercent: null,
+        temperature: null,
+      );
+    }
+
+    final drivePath = driveMatch.group(1)!;
+    final driveSection = _udisksObjectSection(dump, drivePath);
+    if (driveSection.isEmpty) {
+      throw const FormatException('UDisks sürücü bölümü bulunamadı');
+    }
+
+    final updated = int.tryParse(
+          RegExp(
+                r'^\s*SmartUpdated:\s+(\d+)',
+                multiLine: true,
+              ).firstMatch(driveSection)?.group(1) ??
+              '0',
+        ) ??
+        0;
+    final supported =
+        RegExp(
+          r'^\s*SmartSupported:\s+true',
+          multiLine: true,
+        ).hasMatch(driveSection) ||
+        driveSection.contains('org.freedesktop.UDisks2.NVMe.Controller');
+    final failing = RegExp(
+      r'^[ \t]*SmartFailing:[ \t]+true',
+      multiLine: true,
+    ).hasMatch(driveSection);
+    final warningMatch = RegExp(
+      r'^[ \t]*SmartCriticalWarning:[ \t]*([^\r\n]*)$',
+      multiLine: true,
+    ).firstMatch(driveSection);
+    final warningValue = warningMatch?.group(1)?.trim() ?? '';
+    final hasNvmeWarning =
+        warningValue.isNotEmpty &&
+        warningValue != '[]' &&
+        warningValue != '@as []';
+
+    double? temperature;
+    final temperatureMatch = RegExp(
+      r'^\s*SmartTemperature:\s+([0-9.]+)',
+      multiLine: true,
+    ).firstMatch(driveSection);
+    final rawTemperature = double.tryParse(
+      temperatureMatch?.group(1) ?? '',
+    );
+    if (rawTemperature != null && rawTemperature > 0) {
+      temperature = rawTemperature > 200
+          ? rawTemperature - 273.15
+          : rawTemperature;
+    }
+
+    final available = supported && updated > 0;
+    return _SmartStorageInfo(
+      smartAvailable: available,
+      healthFailed: failing || hasNvmeWarning,
+      healthText: !available
+          ? 'SMART bekleniyor'
+          : failing || hasNvmeWarning
+          ? 'Kritik'
+          : kind == StorageDeviceKind.hdd
+          ? 'SMART iyi'
+          : 'İyi',
+      healthPercent: null,
+      temperature: temperature,
+    );
+  } catch (_) {
+    return const _SmartStorageInfo(
+      smartAvailable: false,
+      healthFailed: false,
+      healthText: 'SMART okunamadı',
+      healthPercent: null,
+      temperature: null,
+    );
+  }
+}
+
+String _udisksObjectSection(String dump, String objectPath) {
+  final marker = '$objectPath:';
+  final start = dump.indexOf(marker);
+  if (start < 0) {
+    return '';
+  }
+
+  final nextObject = RegExp(
+    r'\n/org/freedesktop/UDisks2/[^\n]+:',
+  ).firstMatch(dump.substring(start + marker.length));
+  if (nextObject == null) {
+    return dump.substring(start);
+  }
+  final end = start + marker.length + nextObject.start;
+  return dump.substring(start, end);
+}
+
+Future<_SmartStorageInfo> _readSmartStorageInfo(
+  String deviceName,
+  StorageDeviceKind kind,
+) async {
+  final executable = _smartctlExecutable();
+  if (executable == null) {
+    return const _SmartStorageInfo(
+      smartAvailable: false,
+      healthFailed: false,
+      healthText: 'SMART gerekli',
+      healthPercent: null,
+      temperature: null,
+    );
+  }
+
+  try {
+    final arguments = <String>[
+      if (kind == StorageDeviceKind.hdd) ...['-n', 'standby,0'],
+      '-a',
+      '-j',
+      '/dev/$deviceName',
+    ];
+    final result = await Process.run(executable, arguments);
+    final output = result.stdout.toString().trim();
+    if (output.isEmpty) {
+      return const _SmartStorageInfo(
+        smartAvailable: false,
+        healthFailed: false,
+        healthText: 'Yetki gerekli',
+        healthPercent: null,
+        temperature: null,
+      );
+    }
+
+    final decoded = jsonDecode(output);
+    if (decoded is! Map) {
+      throw const FormatException('SMART JSON biçimi geçersiz');
+    }
+
+    final smartStatus = decoded['smart_status'];
+    final passed = smartStatus is Map ? smartStatus['passed'] : null;
+    final smartSupport = decoded['smart_support'];
+    final smartAvailable =
+        passed is bool ||
+        (smartSupport is Map && smartSupport['available'] == true);
+    final healthFailed = passed == false;
+
+    double? healthPercent;
+    final nvmeHealth = decoded['nvme_smart_health_information_log'];
+    if (nvmeHealth is Map) {
+      final percentageUsed = _jsonDouble(nvmeHealth['percentage_used']);
+      if (percentageUsed != null) {
+        healthPercent = (100 - percentageUsed).clamp(0, 100).toDouble();
+      }
+    }
+
+    final ataAttributes = decoded['ata_smart_attributes'];
+    if (healthPercent == null && ataAttributes is Map) {
+      final table = ataAttributes['table'];
+      if (table is List) {
+        const lifetimeNames = {
+          'percent_lifetime_remain',
+          'media_wearout_indicator',
+          'ssd_life_left',
+          'remaining_lifetime_perc',
+        };
+        for (final attribute in table) {
+          if (attribute is! Map) {
+            continue;
+          }
+          final attributeName = attribute['name']
+              ?.toString()
+              .toLowerCase()
+              .replaceAll(' ', '_');
+          if (attributeName != null && lifetimeNames.contains(attributeName)) {
+            healthPercent = _jsonDouble(attribute['value'])
+                ?.clamp(0, 100)
+                .toDouble();
+            break;
+          }
+        }
+      }
+    }
+
+    double? temperature;
+    final temperatureData = decoded['temperature'];
+    if (temperatureData is Map) {
+      temperature = _jsonDouble(temperatureData['current']);
+    }
+    if (temperature == null && nvmeHealth is Map) {
+      temperature = _jsonDouble(nvmeHealth['temperature']);
+    }
+
+    final healthText = !smartAvailable
+        ? 'Yetki gerekli'
+        : healthFailed
+        ? 'Kritik'
+        : healthPercent != null
+        ? '${healthPercent.toStringAsFixed(0)}%'
+        : kind == StorageDeviceKind.ssd
+        ? 'İyi'
+        : 'SMART iyi';
+
+    return _SmartStorageInfo(
+      smartAvailable: smartAvailable,
+      healthFailed: healthFailed,
+      healthText: healthText,
+      healthPercent: healthPercent,
+      temperature: temperature,
+    );
+  } catch (_) {
+    return const _SmartStorageInfo(
+      smartAvailable: false,
+      healthFailed: false,
+      healthText: 'SMART okunamadı',
+      healthPercent: null,
+      temperature: null,
+    );
+  }
+}
+
+String? _smartctlExecutable() {
+  for (final path in const [
+    '/usr/sbin/smartctl',
+    '/sbin/smartctl',
+    '/usr/bin/smartctl',
+  ]) {
+    if (File(path).existsSync()) {
+      return path;
+    }
+  }
+  return null;
+}
+
+double? _readStorageTemperature(String deviceName) {
+  final controllerMatch = RegExp(r'^(nvme\d+)').firstMatch(deviceName);
+  final controllerName = controllerMatch?.group(1);
+  final candidates = <String>[
+    '/sys/class/block/$deviceName/device/hwmon',
+    if (controllerName != null)
+      '/sys/class/nvme/$controllerName/device/hwmon',
+    if (controllerName != null) '/sys/class/nvme/$controllerName/hwmon',
+  ];
+
+  for (final path in candidates) {
+    try {
+      final directory = Directory(path);
+      if (!directory.existsSync()) {
+        continue;
+      }
+      for (final entity in directory.listSync()) {
+        final temperature = _readTemperatureValue(
+          File('${entity.path}/temp1_input'),
+        );
+        if (temperature != null) {
+          return temperature;
+        }
+      }
+    } catch (_) {
+      // Sonraki sysfs konumu denenir.
+    }
+  }
+  return null;
+}
+
+Future<StorageBenchmarkResult> _runStorageBenchmark() async {
+  File? testFile;
+  RandomAccessFile? writer;
+  RandomAccessFile? reader;
+
+  try {
+    final home = Platform.environment['HOME'];
+    final benchmarkDirectory = Directory(
+      home == null || home.isEmpty
+          ? '${Directory.systemTemp.path}/performancepars'
+          : '$home/.cache/performancepars',
+    );
+    await benchmarkDirectory.create(recursive: true);
+    testFile = File(
+      '${benchmarkDirectory.path}/storage-benchmark-${DateTime.now().microsecondsSinceEpoch}.tmp',
+    );
+
+    const blockSize = 4 * 1024 * 1024;
+    const blockCount = 32;
+    const totalBytes = blockSize * blockCount;
+    final block = Uint8List(blockSize);
+    for (var index = 0; index < block.length; index += 4096) {
+      block[index] = (index ~/ 4096) % 251;
+    }
+
+    final activeWriter = await testFile.open(mode: FileMode.write);
+    writer = activeWriter;
+    final writeWatch = Stopwatch()..start();
+    for (var index = 0; index < blockCount; index++) {
+      await activeWriter.writeFrom(block);
+    }
+    await activeWriter.flush();
+    await activeWriter.close();
+    writer = null;
+    writeWatch.stop();
+    final writeSeconds = math.max(
+      writeWatch.elapsedMicroseconds / 1000000,
+      0.001,
+    );
+
+    final readWatch = Stopwatch()..start();
+    final directRead = await Process.run('dd', [
+      'if=${testFile.path}',
+      'of=/dev/null',
+      'bs=4M',
+      'iflag=direct',
+      'status=none',
+    ]);
+    if (directRead.exitCode != 0) {
+      final activeReader = await testFile.open(mode: FileMode.read);
+      reader = activeReader;
+      while ((await activeReader.read(blockSize)).isNotEmpty) {}
+      await activeReader.close();
+      reader = null;
+    }
+    readWatch.stop();
+    final readSeconds = math.max(
+      readWatch.elapsedMicroseconds / 1000000,
+      0.001,
+    );
+
+    return StorageBenchmarkResult(
+      readBytesPerSecond: totalBytes / readSeconds,
+      writeBytesPerSecond: totalBytes / writeSeconds,
+      error: '',
+    );
+  } catch (error) {
+    return StorageBenchmarkResult(
+      readBytesPerSecond: 0,
+      writeBytesPerSecond: 0,
+      error: 'Hız testi tamamlanamadı: $error',
+    );
+  } finally {
+    try {
+      await writer?.close();
+    } catch (_) {}
+    try {
+      await reader?.close();
+    } catch (_) {}
+    try {
+      if (testFile != null && await testFile.exists()) {
+        await testFile.delete();
+      }
+    } catch (_) {}
   }
 }
 
