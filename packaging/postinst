@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+
+if command -v setcap >/dev/null 2>&1 && command -v intel_gpu_top >/dev/null 2>&1; then
+  setcap cap_perfmon=ep "$(command -v intel_gpu_top)" 2>/dev/null || true
+fi
+
+if command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database -q /usr/share/applications || true
+fi
+
+exit 0

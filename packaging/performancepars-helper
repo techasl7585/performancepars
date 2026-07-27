@@ -1,0 +1,30 @@
+#!/bin/bash
+set -euo pipefail
+
+readonly SMARTCTL=/usr/sbin/smartctl
+
+fail() {
+  printf '%s\n' "$1" >&2
+  exit 2
+}
+
+[[ $# -eq 2 ]] || fail "Geçersiz istek."
+[[ "$1" == "smart-json" ]] || fail "Desteklenmeyen işlem."
+[[ -x "$SMARTCTL" ]] || fail "smartctl kurulu değil."
+
+requested_device="$2"
+[[ "$requested_device" == /dev/* ]] || fail "Geçersiz aygıt yolu."
+
+device="$(readlink -f -- "$requested_device")"
+[[ "$device" =~ ^/dev/(sd[a-z]+|nvme[0-9]+n[0-9]+|mmcblk[0-9]+|vd[a-z]+)$ ]] \
+  || fail "Desteklenmeyen aygıt."
+[[ -b "$device" ]] || fail "Aygıt bir blok aygıtı değil."
+
+device_name="${device#/dev/}"
+rotational_file="/sys/class/block/$device_name/queue/rotational"
+
+if [[ -r "$rotational_file" ]] && [[ "$(<"$rotational_file")" == "1" ]]; then
+  exec "$SMARTCTL" -n standby,0 -a -j "$device"
+fi
+
+exec "$SMARTCTL" -a -j "$device"

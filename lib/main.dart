@@ -1215,10 +1215,7 @@ class _StorageHealthPanel extends StatelessWidget {
                 child: _StorageDeviceCard(device: device),
               ),
             if (devices.isEmpty)
-              SizedBox(
-                width: cardWidth,
-                child: const _StorageEmptyCard(),
-              ),
+              SizedBox(width: cardWidth, child: const _StorageEmptyCard()),
             SizedBox(
               width: cardWidth,
               child: _StorageBenchmarkCard(
@@ -1242,9 +1239,7 @@ class _StorageDeviceCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isSsd = device.kind == StorageDeviceKind.ssd;
-    final color = isSsd
-        ? const Color(0xFF6CE5C3)
-        : const Color(0xFFFFB86B);
+    final color = isSsd ? const Color(0xFF6CE5C3) : const Color(0xFFFFB86B);
     final healthColor = device.healthFailed
         ? const Color(0xFFFF6B7A)
         : device.smartAvailable
@@ -4547,9 +4542,7 @@ Future<List<StorageDeviceInfo>> _readStorageDevices() async {
           rotationalValue == true ||
           rotationalValue == 1 ||
           rotationalValue?.toString() == '1';
-      final kind = isRotational
-          ? StorageDeviceKind.hdd
-          : StorageDeviceKind.ssd;
+      final kind = isRotational ? StorageDeviceKind.hdd : StorageDeviceKind.ssd;
       final model = entry['model']?.toString().trim();
       final transportValue = entry['tran']?.toString().trim().toUpperCase();
       final sizeBytes =
@@ -4566,8 +4559,7 @@ Future<List<StorageDeviceInfo>> _readStorageDevices() async {
           name: name,
           model: model == null || model.isEmpty ? name : model,
           kind: kind,
-          transport:
-              transportValue == null || transportValue.isEmpty
+          transport: transportValue == null || transportValue.isEmpty
               ? (name.startsWith('nvme') ? 'NVMe' : 'Yerel')
               : transportValue,
           sizeBytes: sizeBytes,
@@ -4608,12 +4600,8 @@ _SmartStorageInfo _readUDisksStorageInfo(
   }
 
   try {
-    final blockPath =
-        '/org/freedesktop/UDisks2/block_devices/$deviceName';
-    final blockSection = _udisksObjectSection(
-      dump,
-      blockPath,
-    );
+    final blockPath = '/org/freedesktop/UDisks2/block_devices/$deviceName';
+    final blockSection = _udisksObjectSection(dump, blockPath);
     final driveMatch = RegExp(
       r"^\s*Drive:\s+'?([^'\s]+)'?",
       multiLine: true,
@@ -4634,7 +4622,8 @@ _SmartStorageInfo _readUDisksStorageInfo(
       throw const FormatException('UDisks sürücü bölümü bulunamadı');
     }
 
-    final updated = int.tryParse(
+    final updated =
+        int.tryParse(
           RegExp(
                 r'^\s*SmartUpdated:\s+(\d+)',
                 multiLine: true,
@@ -4667,9 +4656,7 @@ _SmartStorageInfo _readUDisksStorageInfo(
       r'^\s*SmartTemperature:\s+([0-9.]+)',
       multiLine: true,
     ).firstMatch(driveSection);
-    final rawTemperature = double.tryParse(
-      temperatureMatch?.group(1) ?? '',
-    );
+    final rawTemperature = double.tryParse(temperatureMatch?.group(1) ?? '');
     if (rawTemperature != null && rawTemperature > 0) {
       temperature = rawTemperature > 200
           ? rawTemperature - 273.15
@@ -4723,7 +4710,9 @@ Future<_SmartStorageInfo> _readSmartStorageInfo(
   StorageDeviceKind kind,
 ) async {
   final executable = _smartctlExecutable();
-  if (executable == null) {
+  const helper = '/usr/lib/performancepars/performancepars-helper';
+  final helperAvailable = File(helper).existsSync();
+  if (executable == null && !helperAvailable) {
     return const _SmartStorageInfo(
       smartAvailable: false,
       healthFailed: false,
@@ -4740,7 +4729,13 @@ Future<_SmartStorageInfo> _readSmartStorageInfo(
       '-j',
       '/dev/$deviceName',
     ];
-    final result = await Process.run(executable, arguments);
+    final result = helperAvailable
+        ? await Process.run('pkexec', [
+            helper,
+            'smart-json',
+            '/dev/$deviceName',
+          ])
+        : await Process.run(executable!, arguments);
     final output = result.stdout.toString().trim();
     if (output.isEmpty) {
       return const _SmartStorageInfo(
@@ -4793,9 +4788,9 @@ Future<_SmartStorageInfo> _readSmartStorageInfo(
               .toLowerCase()
               .replaceAll(' ', '_');
           if (attributeName != null && lifetimeNames.contains(attributeName)) {
-            healthPercent = _jsonDouble(attribute['value'])
-                ?.clamp(0, 100)
-                .toDouble();
+            healthPercent = _jsonDouble(
+              attribute['value'],
+            )?.clamp(0, 100).toDouble();
             break;
           }
         }
@@ -4857,8 +4852,7 @@ double? _readStorageTemperature(String deviceName) {
   final controllerName = controllerMatch?.group(1);
   final candidates = <String>[
     '/sys/class/block/$deviceName/device/hwmon',
-    if (controllerName != null)
-      '/sys/class/nvme/$controllerName/device/hwmon',
+    if (controllerName != null) '/sys/class/nvme/$controllerName/device/hwmon',
     if (controllerName != null) '/sys/class/nvme/$controllerName/hwmon',
   ];
 

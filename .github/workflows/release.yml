@@ -1,0 +1,53 @@
+name: Linux DEB paketi
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Kaynak kodu al
+        uses: actions/checkout@v4
+
+      - name: Linux derleme araçlarını kur
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang cmake ninja-build pkg-config libgtk-3-dev \
+            libblkid-dev liblzma-dev curl git unzip xz-utils zip
+
+      - name: Flutter stable kur
+        run: |
+          git clone --depth 1 --branch stable https://github.com/flutter/flutter.git "$HOME/flutter"
+          echo "$HOME/flutter/bin" >> "$GITHUB_PATH"
+
+      - name: DEB paketini üret
+        run: |
+          chmod +x scripts/build-deb.sh
+          scripts/build-deb.sh
+
+      - name: İş akışı çıktısını sakla
+        uses: actions/upload-artifact@v4
+        with:
+          name: performancepars-linux-amd64
+          path: |
+            dist/*.deb
+            dist/*.sha256
+
+      - name: GitHub sürümüne ekle
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          gh release view "$TAG_NAME" >/dev/null 2>&1 ||
+            gh release create "$TAG_NAME" --title "PerformancePars $TAG_NAME" --generate-notes
+          gh release upload "$TAG_NAME" dist/*.deb dist/*.sha256 --clobber

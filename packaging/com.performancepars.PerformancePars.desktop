@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=PerformancePars
+GenericName=Sistem Performans Merkezi
+Comment=CPU, bellek, disk, ağ, GPU, sıcaklık ve depolama sağlığını izleyin
+Exec=/usr/bin/performancepars
+Icon=com.performancepars.PerformancePars
+Terminal=false
+Categories=System;Monitor;
+Keywords=performance;system;monitor;cpu;gpu;disk;network;pardus;
+StartupNotify=true
+StartupWMClass=com.performancepars.PerformancePars
