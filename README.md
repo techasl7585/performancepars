@@ -5,7 +5,8 @@ disk, ağ, GPU, sıcaklık, batarya, işlemler ve depolama sağlığı gibi değ
 tek arayüzde izleyen masaüstü uygulamasıdır.
 
 ## Gereksinimler
-- amd64 64 bit pc
+- amd64 64 Bit Bilgisayar
+- Kurulum İçin İnternet Bağlantısı
 - Pardus Gnome
 
 ## Özellikler
