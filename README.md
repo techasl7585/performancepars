@@ -1,8 +1,12 @@
 # PerformancePars
 
-PerformancePars; Pardus 25 ve Debian tabanlı Linux sistemlerde işlemci, bellek,
+PerformancePars; Pardus 25 Gnome sistemlerde işlemci, bellek,
 disk, ağ, GPU, sıcaklık, batarya, işlemler ve depolama sağlığı gibi değerleri
 tek arayüzde izleyen masaüstü uygulamasıdır.
+
+## Gereksinimler
+- amd64 64 bit pc
+- Pardus Gnome
 
 ## Özellikler
 
@@ -33,25 +37,18 @@ Kurucu, PerformancePars'ın ihtiyaç duyduğu standart sistem araçlarını ve
 kütüphaneleri otomatik olarak yükler. Son kullanıcının Flutter SDK kurması
 gerekmez.
 
-Terminalden kurulum tercih edilirse:
-
-```bash
-cd ~/İndirilenler
-sudo apt install ./performancepars_1.0.1_amd64.deb
-```
-
 Kurulum tamamlandığında PerformancePars uygulama menüsünde görünür.
-Dosya adındaki `amd64`, 64 bit Intel ve AMD işlemcili bilgisayarları kapsar.
+
 
 ## GPU bölümünün çalışması için - Uygulamazsanız GPU Kısmı Çalışmaz Pasif Gözükür
 
 GPU kartının “Pasif” görünmesi hata anlamına
-gelmez. Önce Sürücülerin Kurulmasu Gerekmektedir. Aşağıdaki doğrulamalar GPU türüne göre yapılmalıdır.
+gelmez. Önce Sürücülerin Kurulmasu Gerekmektedir. Aşağıdaki kurulumlar GPU türüne göre yapılmalıdır.
 
 ### Intel GPU
 
 Paket, Intel ölçümü için gereken `intel-gpu-tools` aracını ve dosya yetkisini
-kurar. Intel GPU “Pasif” kalırsa performans sayaçlarına erişimi etkinleştirin:
+kurar. 
 
 ```bash
 echo 'kernel.perf_event_paranoid=0' | \
@@ -128,37 +125,3 @@ lspci -nnk | grep -A3 -E 'VGA|3D|Display'
 Bu komut algılanan ekran kartlarını ve kullanılan çekirdek sürücülerini
 gösterir. Sürücü kurulduktan veya çekirdek değiştirildikten sonra bilgisayarı
 yeniden başlatmak gerekir.
-
-## Geliştirici kurulumu
-
-Flutter Linux masaüstü ortamını hazırladıktan sonra:
-
-```bash
-flutter pub get
-flutter run -d linux
-```
-
-Kod denetimi ve sürüm derlemesi:
-
-```bash
-dart format --output=none --set-exit-if-changed lib/main.dart
-flutter analyze
-flutter build linux --release
-```
-
-## `.deb` paketi üretme
-
-```bash
-chmod +x scripts/build-deb.sh
-./scripts/build-deb.sh
-```
-
-Paket ve SHA-256 dosyası `dist/` klasörüne yazılır. `v1.0.0` gibi bir Git etiketi
-gönderildiğinde GitHub Actions aynı paketi üretip Releases bölümüne ekler.
-
-## Güvenlik
-
-SMART verisi salt okunur bir sistem yardımcısıyla alınır. Yardımcı yalnızca
-gerçek blok aygıtlarını kabul eder ve SMART üzerinde değişiklik yapan komutlara
-izin vermez. Disk hız testi kullanıcının önbellek dizininde geçici dosya
-oluşturur ve test sonunda dosyayı siler.
