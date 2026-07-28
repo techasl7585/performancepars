@@ -6,14 +6,16 @@ tek arayüzde izleyen masaüstü uygulamasıdır.
 
 ## Özellikler
 
-- CPU kullanımı, sıcaklığı ve canlı grafikleri
-- Intel, AMD ve NVIDIA GPU kullanımı, sıcaklığı, frekansı ve canlı grafikleri
-- Ağ indirme/yükleme ve fiziksel disk okuma/yazma takibi
-- İşlem yöneticisi
-- Gelişmiş sıcaklık ve fan sensörleri
-- SSD ve HDD için ayrı SMART sağlık ve sıcaklık bilgileri
-- Kullanıcı tarafından başlatılan, 128 MB geçici dosyalı disk hız testi
-- Pardus uygulama menüsü ve masaüstü entegrasyonu
+- CPU kullanımı, sıcaklığı ve canlı performans grafikleri
+- Intel, AMD ve NVIDIA GPU kullanımı, frekansı ve canlı performans grafikleri
+- Bellek kullanımı ve Canlı Grafikleri
+- Ağ indirme/yükleme ve disk okuma/yazma hızı takibi
+- Batarya Kullanımı ve Batarya Sağlığı Takibi
+- İşlem yöneticisi (Pc'deki görevleri durdurup yönetebileceğiniz)
+- Gelişmiş sıcaklık sensörleri menüsü ve sistem bakımı öneren boşta sıcaklık ölçümü
+- Depolama için ayrı SMART sağlık ve sıcaklık bilgileri
+- Sistem bilgilerini detaylı yazan sistem bilgileri bölümü
+
 
 ## Son kullanıcı kurulumu
 
@@ -41,12 +43,10 @@ sudo apt install ./performancepars_1.0.1_amd64.deb
 Kurulum tamamlandığında PerformancePars uygulama menüsünde görünür.
 Dosya adındaki `amd64`, 64 bit Intel ve AMD işlemcili bilgisayarları kapsar.
 
-## GPU bölümünün çalışması
+## GPU bölümünün çalışması için - Uygulamazsanız GPU Kısmı Çalışmaz Pasif Gözükür
 
-PerformancePars GPU sürücüsü değildir; işletim sisteminin sunduğu ölçüm
-verilerini gösterir. GPU kartının “Pasif” görünmesi her zaman hata anlamına
-gelmez. Hibrit ekran kartlı dizüstülerde kullanılmayan GPU güç tasarrufu için
-uykuya geçebilir. Aşağıdaki doğrulamalar GPU türüne göre yapılmalıdır.
+GPU kartının “Pasif” görünmesi hata anlamına
+gelmez. Önce Sürücülerin Kurulmasu Gerekmektedir. Aşağıdaki doğrulamalar GPU türüne göre yapılmalıdır.
 
 ### Intel GPU
 
