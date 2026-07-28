@@ -1,14 +1,14 @@
 # PerformancePars
 
 PerformancePars; Pardus 25 ve Debian tabanlı Linux sistemlerde işlemci, bellek,
-disk, ağ, GPU, sıcaklık, batarya, işlemler ve depolama sağlığı gibi işlevleri tek arayüzde
-izleyen masaüstü uygulamasıdır.
+disk, ağ, GPU, sıcaklık, batarya, işlemler ve depolama sağlığı gibi değerleri
+tek arayüzde izleyen masaüstü uygulamasıdır.
 
 ## Özellikler
 
-- CPU Sıcaklık ve Kullanım Takibi ve Grafikleri
-- GPU Sıcaklık Frekans Takibi ve Grafikleri
-- Ağ indirme/yükleme ve fiziksel disk okuma/yazma grafikleri
+- CPU kullanımı, sıcaklığı ve canlı grafikleri
+- Intel, AMD ve NVIDIA GPU kullanımı, sıcaklığı, frekansı ve canlı grafikleri
+- Ağ indirme/yükleme ve fiziksel disk okuma/yazma takibi
 - İşlem yöneticisi
 - Gelişmiş sıcaklık ve fan sensörleri
 - SSD ve HDD için ayrı SMART sağlık ve sıcaklık bilgileri
@@ -17,23 +17,117 @@ izleyen masaüstü uygulamasıdır.
 
 ## Son kullanıcı kurulumu
 
-GitHub Releases bölümünden `performancepars_1.0.0_amd64.deb` dosyasını indirin
-ve dosyaya çift tıklayarak Pardus Paket Kurucu ile yükleyin. Kurucu,
-PerformancePars'ın ihtiyaç duyduğu sistem araçlarını otomatik olarak yükler.
-Flutter SDK kurulması gerekmez.
+> **Önemli:** Yeşil **Code** düğmesindeki “Download ZIP” seçeneğini
+> kullanmayın. Bu dosya uygulamanın kaynak kodudur ve doğrudan kurulmaz.
+
+1. Deponun sağ tarafındaki
+   [Releases](https://github.com/techasl7585/performancepars/releases/latest)
+   bölümünü açın.
+2. En son sürümün **Assets** bölümündeki
+   `performancepars_<sürüm>_amd64.deb` dosyasını indirin.
+3. İndirilen `.deb` dosyasına çift tıklayın ve Pardus Paket Kurucu ile yükleyin.
+
+Kurucu, PerformancePars'ın ihtiyaç duyduğu standart sistem araçlarını ve
+kütüphaneleri otomatik olarak yükler. Son kullanıcının Flutter SDK kurması
+gerekmez.
 
 Terminalden kurulum tercih edilirse:
 
 ```bash
-sudo apt install ./performancepars_1.0.0_amd64.deb
+cd ~/İndirilenler
+sudo apt install ./performancepars_1.0.1_amd64.deb
 ```
 
-Kurulumdan sonra PerformancePars uygulama menüsünde görünür.
+Kurulum tamamlandığında PerformancePars uygulama menüsünde görünür.
+Dosya adındaki `amd64`, 64 bit Intel ve AMD işlemcili bilgisayarları kapsar.
 
-> NVIDIA kullanım, bellek ve güç değerleri için bilgisayara uygun NVIDIA
-> sürücüsünün işletim sistemi tarafından kurulmuş olması gerekir. Donanıma ve
-> çekirdeğe özel olduğu için NVIDIA sürücüsü uygulama paketine zorla eklenmez.
-> Intel ve AMD'nin çekirdek sürücüleri çoğu Pardus kurulumunda hazır gelir.
+## GPU bölümünün çalışması
+
+PerformancePars GPU sürücüsü değildir; işletim sisteminin sunduğu ölçüm
+verilerini gösterir. GPU kartının “Pasif” görünmesi her zaman hata anlamına
+gelmez. Hibrit ekran kartlı dizüstülerde kullanılmayan GPU güç tasarrufu için
+uykuya geçebilir. Aşağıdaki doğrulamalar GPU türüne göre yapılmalıdır.
+
+### Intel GPU
+
+Paket, Intel ölçümü için gereken `intel-gpu-tools` aracını ve dosya yetkisini
+kurar. Intel GPU “Pasif” kalırsa performans sayaçlarına erişimi etkinleştirin:
+
+```bash
+echo 'kernel.perf_event_paranoid=0' | \
+  sudo tee /etc/sysctl.d/60-performancepars.conf
+sudo sysctl --system
+sudo setcap cap_perfmon=ep /usr/bin/intel_gpu_top
+```
+
+Ardından PerformancePars'ı kapatıp yeniden açın. Erişimi terminalde sınamak
+için:
+
+```bash
+timeout 3 intel_gpu_top -J -s 1000
+```
+
+JSON biçiminde ölçüm geliyorsa Intel GPU takibi hazırdır.
+
+### NVIDIA GPU
+
+NVIDIA kullanım, bellek, sıcaklık, frekans ve güç değerleri `nvidia-smi`
+üzerinden okunur. Bunun için bilgisayara ve çalışan çekirdeğe uygun NVIDIA
+sürücüsü kurulmuş olmalıdır. Donanıma ve çekirdeğe özel olduğu, DKMS derlemesi
+ve yeniden başlatma gerektirdiği için NVIDIA sürücüsü uygulamanın `.deb`
+paketine zorla eklenmez.
+
+Pardus 25 üzerinde önce güncel çekirdek ile başlıklarını kurun:
+
+```bash
+sudo apt update
+sudo apt install linux-image-amd64 linux-headers-amd64
+sudo reboot
+```
+
+Sistem yeniden açıldıktan sonra:
+
+```bash
+sudo apt install nvidia-driver nvidia-smi
+sudo reboot
+```
+
+Kurulumu doğrulayın:
+
+```bash
+nvidia-smi
+lsmod | grep -E 'nvidia|nouveau|i915'
+```
+
+`nvidia-smi` ekran kartı bilgilerini gösteriyorsa PerformancePars NVIDIA
+ölçümlerini okuyabilir. Hibrit sistemde Intel GPU masaüstünü çalıştırırken
+NVIDIA GPU boşta `0%`, düşük güç durumunda veya “Pasif” görünebilir; bu normaldir.
+`nvidia-smi: komut bulunamadı` mesajı ise NVIDIA sürücüsü ve ölçüm aracının henüz
+kurulmadığını gösterir.
+
+### AMD GPU
+
+AMD GPU takibi Linux çekirdeğindeki `amdgpu` sürücüsünün sunduğu verilerle
+çalışır. Çoğu Pardus sisteminde ayrıca üretici aracı kurulması gerekmez.
+Sürücüyü doğrulamak için:
+
+```bash
+lspci -nnk | grep -A3 -E 'VGA|3D|Display'
+lsmod | grep amdgpu
+```
+
+Çıktıda `Kernel driver in use: amdgpu` görünmelidir. Çok eski veya ölçüm
+sayacını dışarı sunmayan AMD donanımlarında bazı alanlar kullanılamayabilir.
+
+### Genel GPU tanılama
+
+```bash
+lspci -nnk | grep -A3 -E 'VGA|3D|Display'
+```
+
+Bu komut algılanan ekran kartlarını ve kullanılan çekirdek sürücülerini
+gösterir. Sürücü kurulduktan veya çekirdek değiştirildikten sonra bilgisayarı
+yeniden başlatmak gerekir.
 
 ## Geliştirici kurulumu
 
